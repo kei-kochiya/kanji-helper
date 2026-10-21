@@ -1,109 +1,553 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import confetti from 'canvas-confetti';
-import { Volume2, RotateCcw, Trophy, Flame, CheckCircle, XCircle } from 'lucide-react';
+import {
+  Volume2,
+  Trophy,
+  Flame,
+  CheckCircle,
+  XCircle,
+  Settings2,
+  LogOut,
+  Play,
+  RotateCcw,
+  ArrowRight,
+  Sliders,
+  Check,
+} from 'lucide-react';
 import type { KanjiItem } from '../types/kanji';
 import { speakJapanese } from '../utils/speech';
+
+export type QuizQuestionType =
+  | 'kanji-to-meaning'
+  | 'hanviet-to-kanji'
+  | 'kunyomi-to-kanji'
+  | 'onyomi-to-kanji'
+  | 'kanji-to-kunyomi'
+  | 'kanji-to-onyomi';
+
+interface QuizTypeConfig {
+  id: QuizQuestionType;
+  title: string;
+  badge: string;
+  description: string;
+  example: string;
+}
+
+const ALL_QUIZ_TYPES: QuizTypeConfig[] = [
+  {
+    id: 'kanji-to-meaning',
+    title: 'Kanji → Hán Việt & Nghĩa',
+    badge: 'Hán Việt',
+    description: 'Nhìn chữ Hán, đoán âm Hán Việt và nghĩa tiếng Việt',
+    example: '日 → NHẬT (Mặt trời, ngày)',
+  },
+  {
+    id: 'hanviet-to-kanji',
+    title: 'Hán Việt → Kanji',
+    badge: 'Chữ Hán',
+    description: 'Cho âm Hán Việt, chọn chữ Hán duy nhất có âm này',
+    example: 'HỌC → 学',
+  },
+  {
+    id: 'kunyomi-to-kanji',
+    title: 'Kunyomi → Kanji',
+    badge: 'Kun → Kanji',
+    description: 'Cho âm Kunyomi tiếng Nhật, chọn chữ Hán duy nhất phù hợp',
+    example: 'よ.む → 読',
+  },
+  {
+    id: 'onyomi-to-kanji',
+    title: 'Onyomi → Kanji',
+    badge: 'On → Kanji',
+    description: 'Cho âm Onyomi Katakana, chọn chữ Hán duy nhất phù hợp',
+    example: 'ガク → 学',
+  },
+  {
+    id: 'kanji-to-kunyomi',
+    title: 'Kanji → Kunyomi',
+    badge: 'Kanji → Kun',
+    description: 'Nhìn chữ Hán, chọn âm đọc thuần Nhật Kunyomi chuẩn',
+    example: '読 → よ.む',
+  },
+  {
+    id: 'kanji-to-onyomi',
+    title: 'Kanji → Onyomi',
+    badge: 'Kanji → On',
+    description: 'Nhìn chữ Hán, chọn âm Hán Nhật Onyomi Katakana chuẩn',
+    example: '学 → ガク',
+  },
+];
+
+interface QuizOption {
+  id: string;
+  primaryText: string;
+  secondaryText?: string;
+  isKanji: boolean;
+  isCorrect: boolean;
+  audioText?: string;
+}
+
+interface Question {
+  id: string;
+  type: QuizQuestionType;
+  promptCategory: string;
+  promptQuestion: string;
+  promptMain: string;
+  promptSub?: string;
+  promptAudio?: string;
+  targetKanji: KanjiItem;
+  options: QuizOption[];
+}
+
+interface AnswerHistory {
+  question: Question;
+  selectedOption: QuizOption;
+  isCorrect: boolean;
+}
 
 interface QuizModeProps {
   kanjiList: KanjiItem[];
 }
 
-interface Question {
-  target: KanjiItem;
-  options: KanjiItem[];
-  type: 'kanji-to-meaning' | 'meaning-to-kanji';
-}
-
 export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
-  const [question, setQuestion] = useState<Question | null>(null);
-  const [selectedOption, setSelectedOption] = useState<KanjiItem | null>(null);
+  // Session State
+  const [gameState, setGameState] = useState<'setup' | 'playing' | 'summary'>('setup');
+  
+  // Setup Options
+  const [selectedTypes, setSelectedTypes] = useState<Set<QuizQuestionType>>(
+    () => new Set<QuizQuestionType>(['kanji-to-meaning', 'hanviet-to-kanji', 'kunyomi-to-kanji', 'onyomi-to-kanji'])
+  );
+  const [questionLimit, setQuestionLimit] = useState<number>(10);
+
+  // Gameplay State
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
+  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
+  const [selectedOption, setSelectedOption] = useState<QuizOption | null>(null);
   const [isAnswered, setIsAnswered] = useState<boolean>(false);
   const [score, setScore] = useState<number>(0);
-  const [totalAttempts, setTotalAttempts] = useState<number>(0);
   const [streak, setStreak] = useState<number>(0);
-  const [bestStreak, setBestStreak] = useState<number>(0);
+  const [maxStreak, setMaxStreak] = useState<number>(0);
+  const [history, setHistory] = useState<AnswerHistory[]>([]);
 
-  const generateQuestion = useCallback(() => {
-    if (kanjiList.length < 4) return;
-
-    // Pick 1 target
-    const targetIdx = Math.floor(Math.random() * kanjiList.length);
-    const target = kanjiList[targetIdx];
-
-    // Pick 3 distractors
-    const distractors: KanjiItem[] = [];
-    const used = new Set<number>([targetIdx]);
-    while (distractors.length < 3) {
-      const idx = Math.floor(Math.random() * kanjiList.length);
-      if (!used.has(idx)) {
-        used.add(idx);
-        distractors.push(kanjiList[idx]);
+  // Toggle Type Selection (Enforce at least 1 selected)
+  const handleToggleType = (typeId: QuizQuestionType) => {
+    setSelectedTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(typeId)) {
+        if (next.size > 1) {
+          next.delete(typeId);
+        }
+      } else {
+        next.add(typeId);
       }
-    }
+      return next;
+    });
+  };
 
-    // Shuffle options
-    const options = [target, ...distractors].sort(() => Math.random() - 0.5);
-    const type: 'kanji-to-meaning' | 'meaning-to-kanji' = Math.random() > 0.5 ? 'kanji-to-meaning' : 'meaning-to-kanji';
+  const handleSelectAllTypes = () => {
+    setSelectedTypes(new Set<QuizQuestionType>(ALL_QUIZ_TYPES.map((t) => t.id)));
+  };
 
-    setQuestion({ target, options, type });
-    setSelectedOption(null);
-    setIsAnswered(false);
+  // Pools by category
+  const pools = useMemo(() => {
+    return {
+      withKun: kanjiList.filter((k) => k.kun && k.kun.length > 0),
+      withOn: kanjiList.filter((k) => k.on && k.on.length > 0),
+      withHv: kanjiList.filter((k) => k.hv && k.hv.length > 0),
+      all: kanjiList,
+    };
   }, [kanjiList]);
 
-  useEffect(() => {
-    generateQuestion();
-    setScore(0);
-    setTotalAttempts(0);
-    setStreak(0);
-  }, [generateQuestion]);
+  // Question Generator
+  const generateNewQuestion = useCallback((): Question | null => {
+    if (kanjiList.length < 4) return null;
 
-  const handleSelectOption = (opt: KanjiItem) => {
-    if (isAnswered || !question) return;
+    // Pick a random question type from user's selected types
+    const availableTypes = Array.from(selectedTypes);
+    const chosenType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+
+    // Target Selection depending on chosen question type
+    let targetPool = pools.all;
+    if (chosenType === 'kunyomi-to-kanji' || chosenType === 'kanji-to-kunyomi') {
+      targetPool = pools.withKun.length >= 4 ? pools.withKun : pools.all;
+    } else if (chosenType === 'onyomi-to-kanji' || chosenType === 'kanji-to-onyomi') {
+      targetPool = pools.withOn.length >= 4 ? pools.withOn : pools.all;
+    }
+
+    if (targetPool.length < 4) targetPool = pools.all;
+
+    const targetIdx = Math.floor(Math.random() * targetPool.length);
+    const target = targetPool[targetIdx];
+
+    // Build question depending on type
+    switch (chosenType) {
+      case 'kunyomi-to-kanji': {
+        // Target must have kun
+        const kunList = target.kun.length > 0 ? target.kun : ['—'];
+        const chosenReading = kunList[Math.floor(Math.random() * kunList.length)];
+
+        // Find 3 distractors: MUST NOT contain chosenReading in their kunyomi list!
+        const validDistractors = kanjiList.filter(
+          (k) => k.id !== target.id && !k.kun.includes(chosenReading)
+        );
+        const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
+
+        const rawOptions: QuizOption[] = [
+          {
+            id: target.id,
+            primaryText: target.c,
+            secondaryText: target.hv.slice(0, 2).join(' • '),
+            isKanji: true,
+            isCorrect: true,
+            audioText: target.c,
+          },
+          ...shuffledDistractors.map((d) => ({
+            id: d.id,
+            primaryText: d.c,
+            secondaryText: d.hv.slice(0, 2).join(' • '),
+            isKanji: true,
+            isCorrect: false,
+            audioText: d.c,
+          })),
+        ].sort(() => Math.random() - 0.5);
+
+        return {
+          id: `${target.id}-kun-to-kanji-${Date.now()}`,
+          type: chosenType,
+          promptCategory: 'Kunyomi → Kanji',
+          promptQuestion: 'Chọn chữ Kanji duy nhất có âm đọc Kunyomi:',
+          promptMain: chosenReading,
+          promptSub: `Cấp độ ${target.lvl} • Hán Việt: ${target.hv[0] || ''}`,
+          promptAudio: chosenReading,
+          targetKanji: target,
+          options: rawOptions,
+        };
+      }
+
+      case 'onyomi-to-kanji': {
+        const onList = target.on.length > 0 ? target.on : ['—'];
+        const chosenReading = onList[Math.floor(Math.random() * onList.length)];
+
+        // Find 3 distractors: MUST NOT contain chosenReading in their onyomi list!
+        const validDistractors = kanjiList.filter(
+          (k) => k.id !== target.id && !k.on.includes(chosenReading)
+        );
+        const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
+
+        const rawOptions: QuizOption[] = [
+          {
+            id: target.id,
+            primaryText: target.c,
+            secondaryText: target.hv.slice(0, 2).join(' • '),
+            isKanji: true,
+            isCorrect: true,
+            audioText: target.c,
+          },
+          ...shuffledDistractors.map((d) => ({
+            id: d.id,
+            primaryText: d.c,
+            secondaryText: d.hv.slice(0, 2).join(' • '),
+            isKanji: true,
+            isCorrect: false,
+            audioText: d.c,
+          })),
+        ].sort(() => Math.random() - 0.5);
+
+        return {
+          id: `${target.id}-on-to-kanji-${Date.now()}`,
+          type: chosenType,
+          promptCategory: 'Onyomi → Kanji',
+          promptQuestion: 'Chọn chữ Kanji duy nhất có âm đọc Onyomi:',
+          promptMain: chosenReading,
+          promptSub: `Cấp độ ${target.lvl} • Hán Việt: ${target.hv[0] || ''}`,
+          promptAudio: chosenReading,
+          targetKanji: target,
+          options: rawOptions,
+        };
+      }
+
+      case 'hanviet-to-kanji': {
+        const hvList = target.hv.length > 0 ? target.hv : ['—'];
+        const chosenHv = hvList[Math.floor(Math.random() * hvList.length)];
+
+        // Find 3 distractors: MUST NOT contain chosenHv in their hv list!
+        const validDistractors = kanjiList.filter(
+          (k) => k.id !== target.id && !k.hv.includes(chosenHv)
+        );
+        const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
+
+        const rawOptions: QuizOption[] = [
+          {
+            id: target.id,
+            primaryText: target.c,
+            secondaryText: `${target.st} nét • Bộ ${target.rad}`,
+            isKanji: true,
+            isCorrect: true,
+            audioText: target.c,
+          },
+          ...shuffledDistractors.map((d) => ({
+            id: d.id,
+            primaryText: d.c,
+            secondaryText: `${d.st} nét • Bộ ${d.rad}`,
+            isKanji: true,
+            isCorrect: false,
+            audioText: d.c,
+          })),
+        ].sort(() => Math.random() - 0.5);
+
+        return {
+          id: `${target.id}-hv-to-kanji-${Date.now()}`,
+          type: chosenType,
+          promptCategory: 'Hán Việt → Kanji',
+          promptQuestion: 'Chọn chữ Kanji tương ứng với âm Hán Việt:',
+          promptMain: chosenHv,
+          promptSub: `Nghĩa: ${target.m_vi.slice(0, 2).join(', ')}`,
+          promptAudio: target.c,
+          targetKanji: target,
+          options: rawOptions,
+        };
+      }
+
+      case 'kanji-to-kunyomi': {
+        const kunList = target.kun.length > 0 ? target.kun : ['—'];
+        const correctReading = kunList[Math.floor(Math.random() * kunList.length)];
+
+        // Gather distractors kunyomi from other kanji
+        const otherKuns: string[] = [];
+        for (const k of kanjiList) {
+          if (k.id !== target.id) {
+            for (const r of k.kun) {
+              if (!target.kun.includes(r) && !otherKuns.includes(r)) {
+                otherKuns.push(r);
+              }
+            }
+          }
+          if (otherKuns.length >= 20) break;
+        }
+
+        const shuffledKuns = otherKuns.sort(() => Math.random() - 0.5).slice(0, 3);
+        const rawOptions: QuizOption[] = [
+          {
+            id: `kun-correct-${correctReading}`,
+            primaryText: correctReading,
+            isKanji: false,
+            isCorrect: true,
+            audioText: correctReading,
+          },
+          ...shuffledKuns.map((r, i) => ({
+            id: `kun-distractor-${i}-${r}`,
+            primaryText: r,
+            isKanji: false,
+            isCorrect: false,
+            audioText: r,
+          })),
+        ].sort(() => Math.random() - 0.5);
+
+        return {
+          id: `${target.id}-kanji-to-kun-${Date.now()}`,
+          type: chosenType,
+          promptCategory: 'Kanji → Kunyomi',
+          promptQuestion: 'Chọn âm đọc Kunyomi tiếng Nhật cho chữ Hán:',
+          promptMain: target.c,
+          promptSub: `Hán Việt: ${target.hv.join(' • ')} (${target.m_vi.slice(0, 2).join(', ')})`,
+          promptAudio: target.c,
+          targetKanji: target,
+          options: rawOptions,
+        };
+      }
+
+      case 'kanji-to-onyomi': {
+        const onList = target.on.length > 0 ? target.on : ['—'];
+        const correctReading = onList[Math.floor(Math.random() * onList.length)];
+
+        // Gather distractors onyomi from other kanji
+        const otherOns: string[] = [];
+        for (const k of kanjiList) {
+          if (k.id !== target.id) {
+            for (const r of k.on) {
+              if (!target.on.includes(r) && !otherOns.includes(r)) {
+                otherOns.push(r);
+              }
+            }
+          }
+          if (otherOns.length >= 20) break;
+        }
+
+        const shuffledOns = otherOns.sort(() => Math.random() - 0.5).slice(0, 3);
+        const rawOptions: QuizOption[] = [
+          {
+            id: `on-correct-${correctReading}`,
+            primaryText: correctReading,
+            isKanji: false,
+            isCorrect: true,
+            audioText: correctReading,
+          },
+          ...shuffledOns.map((r, i) => ({
+            id: `on-distractor-${i}-${r}`,
+            primaryText: r,
+            isKanji: false,
+            isCorrect: false,
+            audioText: r,
+          })),
+        ].sort(() => Math.random() - 0.5);
+
+        return {
+          id: `${target.id}-kanji-to-on-${Date.now()}`,
+          type: chosenType,
+          promptCategory: 'Kanji → Onyomi',
+          promptQuestion: 'Chọn âm đọc Onyomi Katakana cho chữ Hán:',
+          promptMain: target.c,
+          promptSub: `Hán Việt: ${target.hv.join(' • ')} (${target.m_vi.slice(0, 2).join(', ')})`,
+          promptAudio: target.c,
+          targetKanji: target,
+          options: rawOptions,
+        };
+      }
+
+      case 'kanji-to-meaning':
+      default: {
+        // Pick 3 distractors with different meanings/HV
+        const validDistractors = kanjiList.filter(
+          (k) => k.id !== target.id && k.hv.join('') !== target.hv.join('')
+        );
+        const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
+
+        const rawOptions: QuizOption[] = [
+          {
+            id: target.id,
+            primaryText: target.hv.join(' • '),
+            secondaryText: target.m_vi.join(', '),
+            isKanji: false,
+            isCorrect: true,
+            audioText: target.c,
+          },
+          ...shuffledDistractors.map((d) => ({
+            id: d.id,
+            primaryText: d.hv.join(' • '),
+            secondaryText: d.m_vi.join(', '),
+            isKanji: false,
+            isCorrect: false,
+            audioText: d.c,
+          })),
+        ].sort(() => Math.random() - 0.5);
+
+        return {
+          id: `${target.id}-kanji-to-meaning-${Date.now()}`,
+          type: chosenType,
+          promptCategory: 'Kanji → Hán Việt & Nghĩa',
+          promptQuestion: 'Chọn âm Hán Việt & nghĩa đúng cho chữ Kanji:',
+          promptMain: target.c,
+          promptSub: `${target.lvl} • ${target.st} nét • Bộ ${target.rad}`,
+          promptAudio: target.c,
+          targetKanji: target,
+          options: rawOptions,
+        };
+      }
+    }
+  }, [kanjiList, selectedTypes, pools]);
+
+  // Start a new Quiz session
+  const startQuiz = () => {
+    setScore(0);
+    setStreak(0);
+    setMaxStreak(0);
+    setCurrentQuestionIndex(0);
+    setHistory([]);
+    setSelectedOption(null);
+    setIsAnswered(false);
+
+    const firstQ = generateNewQuestion();
+    setCurrentQuestion(firstQ);
+    setGameState('playing');
+  };
+
+  // Next Question or Finish
+  const handleAdvance = () => {
+    const nextIndex = currentQuestionIndex + 1;
+    if (nextIndex >= questionLimit) {
+      // Reached limit!
+      setGameState('summary');
+      if (score / questionLimit >= 0.7) {
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 },
+        });
+      }
+    } else {
+      setCurrentQuestionIndex(nextIndex);
+      setSelectedOption(null);
+      setIsAnswered(false);
+      const nextQ = generateNewQuestion();
+      setCurrentQuestion(nextQ);
+    }
+  };
+
+  // Quit / Exit Early
+  const handleQuitEarly = () => {
+    if (history.length > 0) {
+      setGameState('summary');
+    } else {
+      setGameState('setup');
+    }
+  };
+
+  // Handle Option Click
+  const handleSelectOption = (opt: QuizOption) => {
+    if (isAnswered || !currentQuestion) return;
 
     setSelectedOption(opt);
     setIsAnswered(true);
-    setTotalAttempts((prev) => prev + 1);
 
-    const isCorrect = opt.id === question.target.id;
+    const isCorrect = opt.isCorrect;
     if (isCorrect) {
       const newStreak = streak + 1;
       setScore((prev) => prev + 1);
       setStreak(newStreak);
-      if (newStreak > bestStreak) setBestStreak(newStreak);
+      if (newStreak > maxStreak) setMaxStreak(newStreak);
 
       if (newStreak % 5 === 0) {
         confetti({
-          particleCount: 50,
-          spread: 60,
+          particleCount: 40,
+          spread: 50,
           origin: { y: 0.6 },
         });
       }
     } else {
       setStreak(0);
     }
+
+    setHistory((prev) => [
+      ...prev,
+      {
+        question: currentQuestion,
+        selectedOption: opt,
+        isCorrect,
+      },
+    ]);
   };
 
-  // Keyboard support: 1, 2, 3, 4 for options, Space/Enter for next
+  // Keyboard Navigation: 1, 2, 3, 4, Enter/Space
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!question) return;
+      if (gameState !== 'playing' || !currentQuestion) return;
 
       if (['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) {
         const index = parseInt(e.code.replace('Digit', '')) - 1;
-        if (question.options[index] && !isAnswered) {
-          handleSelectOption(question.options[index]);
+        if (currentQuestion.options[index] && !isAnswered) {
+          handleSelectOption(currentQuestion.options[index]);
         }
       } else if ((e.code === 'Space' || e.code === 'Enter') && isAnswered) {
         e.preventDefault();
-        generateQuestion();
+        handleAdvance();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [question, isAnswered, generateQuestion]);
+  }, [gameState, currentQuestion, isAnswered]);
 
-  if (kanjiList.length < 4 || !question) {
+  if (kanjiList.length < 4) {
     return (
       <div className="text-center py-24 text-zinc-500">
         Cần tối thiểu 4 chữ Kanji trong bộ lọc hiện tại để bắt đầu trắc nghiệm.
@@ -111,87 +555,337 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
     );
   }
 
-  const { target, options, type } = question;
+  // 1. SETUP SCREEN
+  if (gameState === 'setup') {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <div className="bg-zinc-900/90 rounded-2xl border border-zinc-800 p-6 sm:p-8 shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6 pb-4 border-b border-zinc-800">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center">
+                <Sliders className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-zinc-100">Cấu hình bài trắc nghiệm</h2>
+                <p className="text-xs text-zinc-400">
+                  Tùy chỉnh dạng câu hỏi và giới hạn số câu theo nhu cầu ôn tập
+                </p>
+              </div>
+            </div>
+
+            <span className="text-xs font-mono text-zinc-400 bg-zinc-800 px-2.5 py-1 rounded-lg border border-zinc-700">
+              {kanjiList.length} chữ trong bộ lọc
+            </span>
+          </div>
+
+          {/* 1. Question Type Selection */}
+          <div className="space-y-3 mb-6">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-mono uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                <span>Dạng câu hỏi (Chọn ít nhất 1 loại):</span>
+              </label>
+
+              <button
+                type="button"
+                onClick={handleSelectAllTypes}
+                className="text-xs text-blue-400 hover:text-blue-300 transition"
+              >
+                Chọn tất cả
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {ALL_QUIZ_TYPES.map((type) => {
+                const isSelected = selectedTypes.has(type.id);
+                return (
+                  <button
+                    key={type.id}
+                    type="button"
+                    onClick={() => handleToggleType(type.id)}
+                    className={`p-3 rounded-xl border text-left transition-all flex items-start gap-3 select-none ${
+                      isSelected
+                        ? 'bg-zinc-800/90 border-blue-500/60 shadow-sm shadow-blue-950/20'
+                        : 'bg-zinc-950/50 border-zinc-850 hover:border-zinc-750 text-zinc-400'
+                    }`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded mt-0.5 flex items-center justify-center shrink-0 border transition ${
+                        isSelected
+                          ? 'bg-blue-600 border-blue-500 text-white'
+                          : 'border-zinc-700 bg-zinc-900'
+                      }`}
+                    >
+                      {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className={`text-xs font-bold ${isSelected ? 'text-zinc-100' : 'text-zinc-400'}`}>
+                          {type.title}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 mt-0.5 line-clamp-1">
+                        {type.description}
+                      </p>
+                      <span className="text-[10px] font-mono text-zinc-500 mt-1 block">
+                        Ví dụ: {type.example}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 2. Question Limit Selection */}
+          <div className="space-y-3 mb-8">
+            <label className="text-xs font-mono uppercase tracking-wider text-zinc-400 block">
+              Giới hạn số câu hỏi:
+            </label>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {[5, 10, 15, 20, 30, 50].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => setQuestionLimit(num)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-mono font-medium border transition ${
+                    questionLimit === num
+                      ? 'bg-blue-600 text-white border-blue-500 font-bold shadow-md shadow-blue-950/40'
+                      : 'bg-zinc-950/60 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200'
+                  }`}
+                >
+                  {num} câu
+                </button>
+              ))}
+
+              <div className="flex items-center gap-1.5 ml-auto">
+                <span className="text-xs text-zinc-400">Tùy chọn:</span>
+                <input
+                  type="number"
+                  min="3"
+                  max="100"
+                  value={questionLimit}
+                  onChange={(e) => setQuestionLimit(Math.max(3, Math.min(100, parseInt(e.target.value) || 10)))}
+                  className="w-16 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-center font-mono text-zinc-200 focus:outline-none focus:border-zinc-600"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Start Quiz Action */}
+          <button
+            type="button"
+            onClick={startQuiz}
+            className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 active:scale-98 text-white font-medium text-sm rounded-xl transition shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2"
+          >
+            <Play className="w-4 h-4 fill-current" />
+            <span>Bắt đầu bài trắc nghiệm ({questionLimit} câu)</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. SUMMARY / RESULT SCREEN
+  if (gameState === 'summary') {
+    const totalQuestions = history.length;
+    const correctCount = history.filter((h) => h.isCorrect).length;
+    const percentage = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
+
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <div className="bg-zinc-900/90 rounded-2xl border border-zinc-800 p-6 sm:p-8 shadow-2xl text-center">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-center text-3xl shadow-inner">
+            {percentage >= 80 ? '🎉' : percentage >= 50 ? '👏' : '💪'}
+          </div>
+
+          <h2 className="text-2xl font-bold text-zinc-100 mb-1">
+            {percentage >= 80 ? 'Xuất sắc!' : percentage >= 50 ? 'Làm tốt lắm!' : 'Cần cố gắng thêm!'}
+          </h2>
+          <p className="text-xs text-zinc-400 mb-6">
+            Đã hoàn thành {totalQuestions} câu hỏi trắc nghiệm
+          </p>
+
+          {/* Stats Bar */}
+          <div className="grid grid-cols-3 gap-3 bg-zinc-950/70 p-4 rounded-xl border border-zinc-800/80 mb-6">
+            <div>
+              <span className="text-[10px] text-zinc-500 font-mono uppercase block">Điểm số</span>
+              <span className="text-xl font-bold text-zinc-100 font-mono">
+                {correctCount} / {totalQuestions}
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] text-zinc-500 font-mono uppercase block">Tỷ lệ đúng</span>
+              <span className={`text-xl font-bold font-mono ${percentage >= 70 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {percentage}%
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] text-zinc-500 font-mono uppercase block">Chuỗi cao nhất</span>
+              <span className="text-xl font-bold text-orange-400 font-mono flex items-center justify-center gap-1">
+                <Flame className="w-4 h-4" />
+                <span>{maxStreak}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Answer History Review List */}
+          <div className="text-left mb-6">
+            <h3 className="text-xs font-mono uppercase tracking-wider text-zinc-400 mb-2">
+              Xem lại các câu hỏi vừa làm ({history.length}):
+            </h3>
+            <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+              {history.map((h, idx) => (
+                <div
+                  key={idx}
+                  className={`p-2.5 rounded-lg border text-xs flex items-center justify-between ${
+                    h.isCorrect
+                      ? 'bg-emerald-950/20 border-emerald-500/30 text-zinc-200'
+                      : 'bg-rose-950/20 border-rose-500/30 text-zinc-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-zinc-500">#{idx + 1}</span>
+                    <span className="text-base font-kanji font-bold text-white">
+                      {h.question.promptMain}
+                    </span>
+                    <span className="text-zinc-400 text-[11px]">
+                      ({h.question.promptCategory})
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className={h.isCorrect ? 'text-emerald-400' : 'text-rose-400'}>
+                      {h.selectedOption.primaryText}
+                    </span>
+                    {h.isCorrect ? (
+                      <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-rose-400" />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => setGameState('setup')}
+              className="py-3 px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium text-xs rounded-xl border border-zinc-700 transition flex items-center justify-center gap-1.5"
+            >
+              <Settings2 className="w-4 h-4" />
+              <span>Cấu hình bài mới</span>
+            </button>
+
+            <button
+              onClick={startQuiz}
+              className="py-3 px-4 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow-md shadow-blue-900/40"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Làm lại bài thi này</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. IN-PLAY SCREEN
+  if (!currentQuestion) return null;
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
-      {/* Top Stats Banner */}
-      <div className="flex items-center justify-between bg-zinc-900/60 px-5 py-3 rounded-2xl border border-zinc-800 mb-6">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5 text-amber-400 font-mono text-sm">
-            <Trophy className="w-4 h-4" />
-            <span>Điểm: {score}/{totalAttempts}</span>
-          </div>
-
-          <div className="flex items-center gap-1.5 text-orange-400 font-mono text-sm">
-            <Flame className="w-4 h-4" />
-            <span>Chuỗi: {streak}</span>
+      {/* Top Session Bar with Quit Option */}
+      <div className="flex items-center justify-between bg-zinc-900/60 px-4 py-3 rounded-2xl border border-zinc-800 mb-4">
+        {/* Left: Progress count */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono font-bold text-zinc-200 bg-zinc-800 px-2.5 py-1 rounded-lg border border-zinc-700">
+            Câu {currentQuestionIndex + 1} / {questionLimit}
+          </span>
+          <div className="w-24 sm:w-32 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 transition-all duration-200"
+              style={{ width: `${((currentQuestionIndex + 1) / questionLimit) * 100}%` }}
+            />
           </div>
         </div>
 
+        {/* Center: Score & Streak */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 text-amber-400 font-mono text-xs">
+            <Trophy className="w-3.5 h-3.5" />
+            <span>{score} đúng</span>
+          </div>
+
+          <div className="flex items-center gap-1 text-orange-400 font-mono text-xs">
+            <Flame className="w-3.5 h-3.5" />
+            <span>{streak} chuỗi</span>
+          </div>
+        </div>
+
+        {/* Right: Quit Early Button */}
         <button
-          onClick={() => {
-            setScore(0);
-            setTotalAttempts(0);
-            setStreak(0);
-            generateQuestion();
-          }}
-          className="text-xs text-zinc-400 hover:text-white flex items-center gap-1 bg-zinc-800/80 px-2.5 py-1 rounded-lg border border-zinc-700/60 transition"
+          onClick={handleQuitEarly}
+          className="text-xs text-zinc-400 hover:text-rose-400 flex items-center gap-1 bg-zinc-800/80 hover:bg-rose-950/30 px-2.5 py-1 rounded-lg border border-zinc-700/60 transition"
+          title="Thoát trắc nghiệm trước khi hết câu"
         >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Làm lại từ đầu</span>
+          <LogOut className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Thoát sớm</span>
         </button>
       </div>
 
       {/* Main Question Card */}
       <div className="bg-zinc-900/90 rounded-2xl border border-zinc-800 p-8 shadow-2xl text-center mb-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
-            {target.lvl} • {target.st} nét
+            {currentQuestion.promptCategory}
           </span>
 
-          <button
-            onClick={() => speakJapanese(target.c)}
-            className="p-1.5 text-zinc-400 hover:text-blue-400 bg-zinc-800 rounded-lg transition"
-            title="Nghe phát âm"
-          >
-            <Volume2 className="w-4 h-4" />
-          </button>
+          {currentQuestion.promptAudio && (
+            <button
+              onClick={() => speakJapanese(currentQuestion.promptAudio || '')}
+              className="p-1.5 text-zinc-400 hover:text-blue-400 bg-zinc-800 rounded-lg transition"
+              title="Nghe phát âm tiếng Nhật"
+            >
+              <Volume2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
-        {type === 'kanji-to-meaning' ? (
-          <div>
-            <div className="text-xs text-zinc-400 mb-2 font-mono uppercase tracking-wider">
-              Chọn âm Hán Việt & nghĩa đúng cho chữ Kanji:
-            </div>
-            <div className="text-8xl font-kanji text-zinc-100 my-4 select-none">
-              {target.c}
-            </div>
+        <div className="text-xs text-zinc-400 mb-2 font-mono uppercase tracking-wider">
+          {currentQuestion.promptQuestion}
+        </div>
+
+        {/* Big Prompt Display */}
+        <div className="my-4">
+          <div
+            className={`font-kanji text-zinc-100 select-none ${
+              currentQuestion.promptMain.length <= 2 ? 'text-8xl' : 'text-4xl font-bold tracking-wide'
+            }`}
+          >
+            {currentQuestion.promptMain}
           </div>
-        ) : (
-          <div>
-            <div className="text-xs text-zinc-400 mb-2 font-mono uppercase tracking-wider">
-              Chọn chữ Kanji tương ứng với:
+
+          {currentQuestion.promptSub && (
+            <div className="text-sm text-zinc-400 mt-2 font-medium">
+              {currentQuestion.promptSub}
             </div>
-            <div className="text-3xl font-bold text-amber-400 uppercase tracking-wide my-3">
-              {target.hv.join(' • ')}
-            </div>
-            <div className="text-sm text-zinc-300 max-w-md mx-auto line-clamp-2">
-              {target.m_vi.join(', ')}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* 4 Multiple Choice Options */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-        {options.map((opt, idx) => {
-          const isCorrect = opt.id === target.id;
+        {currentQuestion.options.map((opt, idx) => {
           const isSelected = selectedOption?.id === opt.id;
 
           let btnStyle = 'bg-zinc-900/70 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 text-zinc-200';
           if (isAnswered) {
-            if (isCorrect) {
+            if (opt.isCorrect) {
               btnStyle = 'bg-emerald-950/40 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-950/30';
             } else if (isSelected) {
               btnStyle = 'bg-rose-950/40 border-rose-500 text-rose-300';
@@ -213,21 +907,19 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
                 </span>
 
                 <div className="min-w-0">
-                  {type === 'kanji-to-meaning' ? (
-                    <div>
-                      <div className="text-sm font-bold text-amber-400 uppercase tracking-wide truncate">
-                        {opt.hv.join(' • ')}
-                      </div>
-                      <div className="text-xs text-zinc-300 truncate mt-0.5">
-                        {opt.m_vi.join(', ')}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <span className="text-3xl font-kanji text-zinc-100">{opt.c}</span>
-                      <span className="text-xs text-zinc-400 font-mono">
-                        ({opt.st} nét)
-                      </span>
+                  <div
+                    className={`font-bold ${
+                      opt.isKanji
+                        ? 'text-3xl font-kanji text-zinc-100'
+                        : 'text-base font-kanji text-zinc-200 truncate'
+                    }`}
+                  >
+                    {opt.primaryText}
+                  </div>
+
+                  {opt.secondaryText && (
+                    <div className="text-xs text-zinc-400 truncate mt-0.5">
+                      {opt.secondaryText}
                     </div>
                   )}
                 </div>
@@ -235,8 +927,8 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
 
               {isAnswered && (
                 <div className="shrink-0 ml-2">
-                  {isCorrect && <CheckCircle className="w-5 h-5 text-emerald-400" />}
-                  {isSelected && !isCorrect && <XCircle className="w-5 h-5 text-rose-400" />}
+                  {opt.isCorrect && <CheckCircle className="w-5 h-5 text-emerald-400" />}
+                  {isSelected && !opt.isCorrect && <XCircle className="w-5 h-5 text-rose-400" />}
                 </div>
               )}
             </button>
@@ -244,21 +936,24 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
         })}
       </div>
 
-      {/* Next Question Button after answering */}
+      {/* Next Question / Finish Button */}
       {isAnswered && (
         <div className="mt-6 flex justify-center animate-in fade-in duration-200">
           <button
-            onClick={generateQuestion}
+            onClick={handleAdvance}
             className="px-6 py-3 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-medium text-sm rounded-xl transition shadow-lg shadow-blue-900/40 flex items-center gap-2"
           >
-            <span>Câu tiếp theo</span>
+            <span>
+              {currentQuestionIndex + 1 >= questionLimit ? 'Xem kết quả tổng kết' : 'Câu tiếp theo'}
+            </span>
             <span className="text-xs font-mono opacity-80">[Enter]</span>
+            <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       )}
 
       <div className="text-[11px] text-zinc-500 mt-6 text-center font-mono">
-        Phím tắt: bấm [1, 2, 3, 4] để chọn • [Enter] / [Space] để qua câu tiếp theo
+        Bấm phím [1, 2, 3, 4] để chọn đáp án • [Enter] hoặc [Phím Cách] để tiếp tục
       </div>
     </div>
   );

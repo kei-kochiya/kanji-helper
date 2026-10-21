@@ -2,7 +2,6 @@
 
 > Web học chữ Hán (Kanji) toàn diện từ **JLPT N5 đến N1** với thiết kế hiện đại, dark mode tối giản, tra cứu tức thì, không AI slop, hỗ trợ âm Hán Việt, âm On/Kun, giải nghĩa tiếng Việt và ảnh động nét viết KanjiVG.
 
-[![Vercel Ready](https://img.shields.io/badge/Deploy-Vercel-black?style=flat&logo=vercel)](https://vercel.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kanji Count](https://img.shields.io/badge/Kanji%20Count-2%2C383%20Chars-emerald)](src/data/kanji_data.json)
 
@@ -22,7 +21,7 @@
   - **Âm Hán Việt**: Hiển thị nổi bật in hoa (**HỌC**, **NHẬT**, **SINH**...) giúp ghi nhớ từ ghép (Jukugo) siêu nhanh.
   - **Nghĩa tiếng Việt**: Giải nghĩa Hán Nôm chi tiết kèm nghĩa tiếng Anh đối chiếu.
   - **Âm On (Onyomi)**: Phiên âm Katakana chuẩn.
-  - **Âm Kun (Kunyomi)**: Phiên âm Hiragana kèm đánh dấu Okurigana.
+  - **Âm Kun (Kunyomi)**: Phiên âm Hiragana kèm dấu chấm ngăn cách okurigana (ví dụ: `よ.む`, `まな.ぶ`).
   - **Số nét & Bộ thủ**: Tên bộ thủ bằng tiếng Việt và số nét Hán tự.
   - **Từ vựng ví dụ (Jukugo)**: Các từ ghép thông dụng nhất chứa Hán tự đó.
 - **Thứ tự nét viết (Stroke Order)**:
@@ -34,7 +33,16 @@
 - **4 Chế độ học tập chuyên biệt**:
   1. **Thư viện (Explorer)**: Lưới tra cứu tốc độ 0ms, tìm kiếm đa năng (theo Kanji, Hán Việt, Romaji, Kana, nghĩa).
   2. **Thẻ nhớ Flashcard (SRS)**: Học lật mặt thẻ 3D, hỗ trợ phím tắt Space/Mũi tên, đánh dấu thuộc / chưa thuộc.
-  3. **Trắc nghiệm (Quiz)**: Câu hỏi 4 lựa chọn sinh tự động từ bộ lọc, tính điểm, chuỗi streak và hiệu ứng ăn mừng.
+  3. **Trắc nghiệm nâng cao (Quiz)**:
+     - Tùy chọn nhiều dạng câu hỏi phong phú (chọn ít nhất 1 dạng, nhiều nhất tất cả):
+       - *Kanji → Hán Việt & Nghĩa*
+       - *Hán Việt → Kanji*
+       - *Kunyomi → Kanji* (đảm bảo chỉ có 1 đáp án đúng trong 4 lựa chọn)
+       - *Onyomi → Kanji* (đảm bảo chỉ có 1 đáp án đúng trong 4 lựa chọn)
+       - *Kanji → Kunyomi* (ví dụ: `読` → `よ.む`)
+       - *Kanji → Onyomi* (ví dụ: `学` → `ガク`)
+     - Cài đặt giới hạn số câu hỏi (5, 10, 15, 20, 30, 50 câu).
+     - Cho phép dừng sớm / thoát bất cứ lúc nào và hiển thị tổng kết bài làm chi tiết.
   4. **Luyện viết nét (Stroke Lab)**: Trực quan hóa thứ tự nét và thực hành vẽ trực tiếp trên canvas.
 - **Lưu trữ tiến độ (Offline & LocalStorage)**:
   - Tự động lưu chữ đã thuộc, danh sách yêu thích (Bookmark).
@@ -73,27 +81,6 @@ npm run dev
 ```
 
 Mở trình duyệt tại `http://localhost:5173`.
-
----
-
-## ☁️ Hướng dẫn Deploy lên Vercel (1-Click Deploy)
-
-Dự án đã được cấu hình sẵn tệp `vercel.json` phục vụ Single Page Application (SPA), bạn có thể deploy lên Vercel cực kỳ đơn giản:
-
-### Cách 1: Kết nối Vercel với GitHub (Khuyên dùng)
-1. Truy cập [vercel.com](https://vercel.com) và đăng nhập bằng tài khoản GitHub.
-2. Nhấn **"Add New Project"** -> Chọn repository **`kei-kochiya/kanji-helper`**.
-3. Vercel sẽ tự động phát hiện cấu hình **Vite**:
-   - **Framework Preset**: `Vite`
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-4. Nhấn **"Deploy"** — Chỉ mất khoảng 20 giây là trang web sẽ online với tên miền miễn phí dạng `kanji-helper.vercel.app` (hỗ trợ HTTPS và CDN toàn cầu).
-
-### Cách 2: Deploy bằng Vercel CLI
-```bash
-npm i -g vercel
-vercel
-```
 
 ---
 
