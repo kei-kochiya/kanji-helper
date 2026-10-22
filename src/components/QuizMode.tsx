@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Volume2,
@@ -109,25 +109,347 @@ interface QuizModeProps {
   kanjiList: KanjiItem[];
 }
 
+/**
+ * Helper to build an entire Quiz Deck without duplicate target Kanji
+ */
+function buildQuizDeck(
+  pool: KanjiItem[],
+  types: QuizQuestionType[],
+  limit: number
+): Question[] {
+  if (pool.length < 4 || types.length === 0) return [];
+
+  // Determine actual question count (clamped to pool size to guarantee zero target repetition)
+  const targetCount = Math.min(limit, pool.length);
+
+  // Shuffle pool to pick `targetCount` distinct target Kanji
+  const shuffledPool = [...pool].sort(() => Math.random() - 0.5);
+
+  // Pre-collect unique readings across the pool for rich distractor selection
+  const allUniqueOns = Array.from(new Set(pool.flatMap((k) => k.on)));
+  const allUniqueKuns = Array.from(new Set(pool.flatMap((k) => k.kun)));
+
+  const deck: Question[] = [];
+  const usedTargetIds = new Set<string>();
+
+  for (let i = 0; i < shuffledPool.length && deck.length < targetCount; i++) {
+    const target = shuffledPool[i];
+    if (usedTargetIds.has(target.id)) continue;
+
+    // Filter question types this specific target can support
+    const eligibleTypes = types.filter((t) => {
+      if (t === 'kunyomi-to-kanji' || t === 'kanji-to-kunyomi') {
+        return target.kun && target.kun.length > 0;
+      }
+      if (t === 'onyomi-to-kanji' || t === 'kanji-to-onyomi') {
+        return target.on && target.on.length > 0;
+      }
+      if (t === 'hanviet-to-kanji') {
+        return target.hv && target.hv.length > 0;
+      }
+      return true; // kanji-to-meaning is always eligible
+    });
+
+    if (eligibleTypes.length === 0) continue;
+
+    // Rotate or pick a type from eligible types
+    const chosenType = eligibleTypes[deck.length % eligibleTypes.length];
+    const question = createSingleQuestion(target, chosenType, pool, allUniqueOns, allUniqueKuns);
+
+    if (question) {
+      deck.push(question);
+      usedTargetIds.add(target.id);
+    }
+  }
+
+  return deck;
+}
+
+function createSingleQuestion(
+  target: KanjiItem,
+  type: QuizQuestionType,
+  pool: KanjiItem[],
+  allUniqueOns: string[],
+  allUniqueKuns: string[]
+): Question | null {
+  switch (type) {
+    case 'kunyomi-to-kanji': {
+      if (!target.kun || target.kun.length === 0) return null;
+      const chosenReading = target.kun[Math.floor(Math.random() * target.kun.length)];
+
+      // 3 Distractors: MUST NOT have chosenReading in their kunyomi list!
+      const validDistractors = pool.filter(
+        (k) => k.id !== target.id && !k.kun.includes(chosenReading)
+      );
+      if (validDistractors.length < 3) return null;
+      const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
+
+      const rawOptions: QuizOption[] = [
+        {
+          id: target.id,
+          primaryText: target.c,
+          secondaryText: target.hv.slice(0, 2).join(' • '),
+          isKanji: true,
+          isCorrect: true,
+          audioText: target.c,
+        },
+        ...shuffledDistractors.map((d) => ({
+          id: d.id,
+          primaryText: d.c,
+          secondaryText: d.hv.slice(0, 2).join(' • '),
+          isKanji: true,
+          isCorrect: false,
+          audioText: d.c,
+        })),
+      ].sort(() => Math.random() - 0.5);
+
+      return {
+        id: `${target.id}-kun-to-kanji-${Math.random()}`,
+        type,
+        promptCategory: 'Kunyomi → Kanji',
+        promptQuestion: 'Chọn chữ Kanji duy nhất có âm đọc Kunyomi:',
+        promptMain: chosenReading,
+        promptSub: `Cấp độ ${target.lvl} • Hán Việt: ${target.hv[0] || ''}`,
+        promptAudio: chosenReading,
+        targetKanji: target,
+        options: rawOptions,
+      };
+    }
+
+    case 'onyomi-to-kanji': {
+      if (!target.on || target.on.length === 0) return null;
+      const chosenReading = target.on[Math.floor(Math.random() * target.on.length)];
+
+      // 3 Distractors: MUST NOT have chosenReading in their onyomi list!
+      const validDistractors = pool.filter(
+        (k) => k.id !== target.id && !k.on.includes(chosenReading)
+      );
+      if (validDistractors.length < 3) return null;
+      const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
+
+      const rawOptions: QuizOption[] = [
+        {
+          id: target.id,
+          primaryText: target.c,
+          secondaryText: target.hv.slice(0, 2).join(' • '),
+          isKanji: true,
+          isCorrect: true,
+          audioText: target.c,
+        },
+        ...shuffledDistractors.map((d) => ({
+          id: d.id,
+          primaryText: d.c,
+          secondaryText: d.hv.slice(0, 2).join(' • '),
+          isKanji: true,
+          isCorrect: false,
+          audioText: d.c,
+        })),
+      ].sort(() => Math.random() - 0.5);
+
+      return {
+        id: `${target.id}-on-to-kanji-${Math.random()}`,
+        type,
+        promptCategory: 'Onyomi → Kanji',
+        promptQuestion: 'Chọn chữ Kanji duy nhất có âm đọc Onyomi:',
+        promptMain: chosenReading,
+        promptSub: `Cấp độ ${target.lvl} • Hán Việt: ${target.hv[0] || ''}`,
+        promptAudio: chosenReading,
+        targetKanji: target,
+        options: rawOptions,
+      };
+    }
+
+    case 'hanviet-to-kanji': {
+      if (!target.hv || target.hv.length === 0) return null;
+      const chosenHv = target.hv[Math.floor(Math.random() * target.hv.length)];
+
+      // 3 Distractors: MUST NOT have chosenHv in their hv list!
+      const validDistractors = pool.filter(
+        (k) => k.id !== target.id && !k.hv.includes(chosenHv)
+      );
+      if (validDistractors.length < 3) return null;
+      const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
+
+      const rawOptions: QuizOption[] = [
+        {
+          id: target.id,
+          primaryText: target.c,
+          secondaryText: `${target.st} nét • Bộ ${target.rad}`,
+          isKanji: true,
+          isCorrect: true,
+          audioText: target.c,
+        },
+        ...shuffledDistractors.map((d) => ({
+          id: d.id,
+          primaryText: d.c,
+          secondaryText: `${d.st} nét • Bộ ${d.rad}`,
+          isKanji: true,
+          isCorrect: false,
+          audioText: d.c,
+        })),
+      ].sort(() => Math.random() - 0.5);
+
+      return {
+        id: `${target.id}-hv-to-kanji-${Math.random()}`,
+        type,
+        promptCategory: 'Hán Việt → Kanji',
+        promptQuestion: 'Chọn chữ Kanji tương ứng với âm Hán Việt:',
+        promptMain: chosenHv,
+        promptSub: `Nghĩa: ${target.m_vi.slice(0, 2).join(', ')}`,
+        promptAudio: target.c,
+        targetKanji: target,
+        options: rawOptions,
+      };
+    }
+
+    case 'kanji-to-kunyomi': {
+      if (!target.kun || target.kun.length === 0) return null;
+      const correctReading = target.kun[Math.floor(Math.random() * target.kun.length)];
+
+      // Pick 3 distractor Kunyomi from the entire pool that DO NOT belong to target
+      const validDistractorKuns = allUniqueKuns.filter((r) => !target.kun.includes(r));
+      if (validDistractorKuns.length < 3) return null;
+      const shuffledKuns = [...validDistractorKuns].sort(() => Math.random() - 0.5).slice(0, 3);
+
+      const rawOptions: QuizOption[] = [
+        {
+          id: `kun-correct-${correctReading}`,
+          primaryText: correctReading,
+          isKanji: false,
+          isCorrect: true,
+          audioText: correctReading,
+        },
+        ...shuffledKuns.map((r, i) => ({
+          id: `kun-distractor-${i}-${r}`,
+          primaryText: r,
+          isKanji: false,
+          isCorrect: false,
+          audioText: r,
+        })),
+      ].sort(() => Math.random() - 0.5);
+
+      return {
+        id: `${target.id}-kanji-to-kun-${Math.random()}`,
+        type,
+        promptCategory: 'Kanji → Kunyomi',
+        promptQuestion: 'Chọn âm đọc Kunyomi tiếng Nhật cho chữ Hán:',
+        promptMain: target.c,
+        promptSub: `Hán Việt: ${target.hv.join(' • ')} (${target.m_vi.slice(0, 2).join(', ')})`,
+        promptAudio: target.c,
+        targetKanji: target,
+        options: rawOptions,
+      };
+    }
+
+    case 'kanji-to-onyomi': {
+      if (!target.on || target.on.length === 0) return null;
+      const correctReading = target.on[Math.floor(Math.random() * target.on.length)];
+
+      // Pick 3 distractor Onyomi from the entire pool that DO NOT belong to target
+      const validDistractorOns = allUniqueOns.filter((r) => !target.on.includes(r));
+      if (validDistractorOns.length < 3) return null;
+      const shuffledOns = [...validDistractorOns].sort(() => Math.random() - 0.5).slice(0, 3);
+
+      const rawOptions: QuizOption[] = [
+        {
+          id: `on-correct-${correctReading}`,
+          primaryText: correctReading,
+          isKanji: false,
+          isCorrect: true,
+          audioText: correctReading,
+        },
+        ...shuffledOns.map((r, i) => ({
+          id: `on-distractor-${i}-${r}`,
+          primaryText: r,
+          isKanji: false,
+          isCorrect: false,
+          audioText: r,
+        })),
+      ].sort(() => Math.random() - 0.5);
+
+      return {
+        id: `${target.id}-kanji-to-on-${Math.random()}`,
+        type,
+        promptCategory: 'Kanji → Onyomi',
+        promptQuestion: 'Chọn âm đọc Onyomi Katakana cho chữ Hán:',
+        promptMain: target.c,
+        promptSub: `Hán Việt: ${target.hv.join(' • ')} (${target.m_vi.slice(0, 2).join(', ')})`,
+        promptAudio: target.c,
+        targetKanji: target,
+        options: rawOptions,
+      };
+    }
+
+    case 'kanji-to-meaning':
+    default: {
+      const validDistractors = pool.filter(
+        (k) => k.id !== target.id && k.hv.join('') !== target.hv.join('')
+      );
+      if (validDistractors.length < 3) return null;
+      const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
+
+      const rawOptions: QuizOption[] = [
+        {
+          id: target.id,
+          primaryText: target.hv.join(' • '),
+          secondaryText: target.m_vi.join(', '),
+          isKanji: false,
+          isCorrect: true,
+          audioText: target.c,
+        },
+        ...shuffledDistractors.map((d) => ({
+          id: d.id,
+          primaryText: d.hv.join(' • '),
+          secondaryText: d.m_vi.join(', '),
+          isKanji: false,
+          isCorrect: false,
+          audioText: d.c,
+        })),
+      ].sort(() => Math.random() - 0.5);
+
+      return {
+        id: `${target.id}-kanji-to-meaning-${Math.random()}`,
+        type,
+        promptCategory: 'Kanji → Hán Việt & Nghĩa',
+        promptQuestion: 'Chọn âm Hán Việt & nghĩa đúng cho chữ Kanji:',
+        promptMain: target.c,
+        promptSub: `${target.lvl} • ${target.st} nét • Bộ ${target.rad}`,
+        promptAudio: target.c,
+        targetKanji: target,
+        options: rawOptions,
+      };
+    }
+  }
+}
+
 export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
   // Session State
   const [gameState, setGameState] = useState<'setup' | 'playing' | 'summary'>('setup');
-  
+
   // Setup Options
   const [selectedTypes, setSelectedTypes] = useState<Set<QuizQuestionType>>(
-    () => new Set<QuizQuestionType>(['kanji-to-meaning', 'hanviet-to-kanji', 'kunyomi-to-kanji', 'onyomi-to-kanji'])
+    () =>
+      new Set<QuizQuestionType>([
+        'kanji-to-meaning',
+        'hanviet-to-kanji',
+        'kunyomi-to-kanji',
+        'onyomi-to-kanji',
+      ])
   );
   const [questionLimit, setQuestionLimit] = useState<number>(10);
 
-  // Gameplay State
+  // Pre-generated Deck State (Guarantees zero duplicate targets across the session!)
+  const [quizDeck, setQuizDeck] = useState<Question[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
-  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
   const [selectedOption, setSelectedOption] = useState<QuizOption | null>(null);
   const [isAnswered, setIsAnswered] = useState<boolean>(false);
   const [score, setScore] = useState<number>(0);
   const [streak, setStreak] = useState<number>(0);
   const [maxStreak, setMaxStreak] = useState<number>(0);
   const [history, setHistory] = useState<AnswerHistory[]>([]);
+
+  // Max selectable questions based on current filtered pool
+  const maxAvailable = useMemo(() => kanjiList.length, [kanjiList.length]);
 
   // Toggle Type Selection (Enforce at least 1 selected)
   const handleToggleType = (typeId: QuizQuestionType) => {
@@ -148,326 +470,31 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
     setSelectedTypes(new Set<QuizQuestionType>(ALL_QUIZ_TYPES.map((t) => t.id)));
   };
 
-  // Pools by category
-  const pools = useMemo(() => {
-    return {
-      withKun: kanjiList.filter((k) => k.kun && k.kun.length > 0),
-      withOn: kanjiList.filter((k) => k.on && k.on.length > 0),
-      withHv: kanjiList.filter((k) => k.hv && k.hv.length > 0),
-      all: kanjiList,
-    };
-  }, [kanjiList]);
-
-  // Question Generator
-  const generateNewQuestion = useCallback((): Question | null => {
-    if (kanjiList.length < 4) return null;
-
-    // Pick a random question type from user's selected types
-    const availableTypes = Array.from(selectedTypes);
-    const chosenType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
-
-    // Target Selection depending on chosen question type
-    let targetPool = pools.all;
-    if (chosenType === 'kunyomi-to-kanji' || chosenType === 'kanji-to-kunyomi') {
-      targetPool = pools.withKun.length >= 4 ? pools.withKun : pools.all;
-    } else if (chosenType === 'onyomi-to-kanji' || chosenType === 'kanji-to-onyomi') {
-      targetPool = pools.withOn.length >= 4 ? pools.withOn : pools.all;
-    }
-
-    if (targetPool.length < 4) targetPool = pools.all;
-
-    const targetIdx = Math.floor(Math.random() * targetPool.length);
-    const target = targetPool[targetIdx];
-
-    // Build question depending on type
-    switch (chosenType) {
-      case 'kunyomi-to-kanji': {
-        // Target must have kun
-        const kunList = target.kun.length > 0 ? target.kun : ['—'];
-        const chosenReading = kunList[Math.floor(Math.random() * kunList.length)];
-
-        // Find 3 distractors: MUST NOT contain chosenReading in their kunyomi list!
-        const validDistractors = kanjiList.filter(
-          (k) => k.id !== target.id && !k.kun.includes(chosenReading)
-        );
-        const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
-
-        const rawOptions: QuizOption[] = [
-          {
-            id: target.id,
-            primaryText: target.c,
-            secondaryText: target.hv.slice(0, 2).join(' • '),
-            isKanji: true,
-            isCorrect: true,
-            audioText: target.c,
-          },
-          ...shuffledDistractors.map((d) => ({
-            id: d.id,
-            primaryText: d.c,
-            secondaryText: d.hv.slice(0, 2).join(' • '),
-            isKanji: true,
-            isCorrect: false,
-            audioText: d.c,
-          })),
-        ].sort(() => Math.random() - 0.5);
-
-        return {
-          id: `${target.id}-kun-to-kanji-${Date.now()}`,
-          type: chosenType,
-          promptCategory: 'Kunyomi → Kanji',
-          promptQuestion: 'Chọn chữ Kanji duy nhất có âm đọc Kunyomi:',
-          promptMain: chosenReading,
-          promptSub: `Cấp độ ${target.lvl} • Hán Việt: ${target.hv[0] || ''}`,
-          promptAudio: chosenReading,
-          targetKanji: target,
-          options: rawOptions,
-        };
-      }
-
-      case 'onyomi-to-kanji': {
-        const onList = target.on.length > 0 ? target.on : ['—'];
-        const chosenReading = onList[Math.floor(Math.random() * onList.length)];
-
-        // Find 3 distractors: MUST NOT contain chosenReading in their onyomi list!
-        const validDistractors = kanjiList.filter(
-          (k) => k.id !== target.id && !k.on.includes(chosenReading)
-        );
-        const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
-
-        const rawOptions: QuizOption[] = [
-          {
-            id: target.id,
-            primaryText: target.c,
-            secondaryText: target.hv.slice(0, 2).join(' • '),
-            isKanji: true,
-            isCorrect: true,
-            audioText: target.c,
-          },
-          ...shuffledDistractors.map((d) => ({
-            id: d.id,
-            primaryText: d.c,
-            secondaryText: d.hv.slice(0, 2).join(' • '),
-            isKanji: true,
-            isCorrect: false,
-            audioText: d.c,
-          })),
-        ].sort(() => Math.random() - 0.5);
-
-        return {
-          id: `${target.id}-on-to-kanji-${Date.now()}`,
-          type: chosenType,
-          promptCategory: 'Onyomi → Kanji',
-          promptQuestion: 'Chọn chữ Kanji duy nhất có âm đọc Onyomi:',
-          promptMain: chosenReading,
-          promptSub: `Cấp độ ${target.lvl} • Hán Việt: ${target.hv[0] || ''}`,
-          promptAudio: chosenReading,
-          targetKanji: target,
-          options: rawOptions,
-        };
-      }
-
-      case 'hanviet-to-kanji': {
-        const hvList = target.hv.length > 0 ? target.hv : ['—'];
-        const chosenHv = hvList[Math.floor(Math.random() * hvList.length)];
-
-        // Find 3 distractors: MUST NOT contain chosenHv in their hv list!
-        const validDistractors = kanjiList.filter(
-          (k) => k.id !== target.id && !k.hv.includes(chosenHv)
-        );
-        const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
-
-        const rawOptions: QuizOption[] = [
-          {
-            id: target.id,
-            primaryText: target.c,
-            secondaryText: `${target.st} nét • Bộ ${target.rad}`,
-            isKanji: true,
-            isCorrect: true,
-            audioText: target.c,
-          },
-          ...shuffledDistractors.map((d) => ({
-            id: d.id,
-            primaryText: d.c,
-            secondaryText: `${d.st} nét • Bộ ${d.rad}`,
-            isKanji: true,
-            isCorrect: false,
-            audioText: d.c,
-          })),
-        ].sort(() => Math.random() - 0.5);
-
-        return {
-          id: `${target.id}-hv-to-kanji-${Date.now()}`,
-          type: chosenType,
-          promptCategory: 'Hán Việt → Kanji',
-          promptQuestion: 'Chọn chữ Kanji tương ứng với âm Hán Việt:',
-          promptMain: chosenHv,
-          promptSub: `Nghĩa: ${target.m_vi.slice(0, 2).join(', ')}`,
-          promptAudio: target.c,
-          targetKanji: target,
-          options: rawOptions,
-        };
-      }
-
-      case 'kanji-to-kunyomi': {
-        const kunList = target.kun.length > 0 ? target.kun : ['—'];
-        const correctReading = kunList[Math.floor(Math.random() * kunList.length)];
-
-        // Gather distractors kunyomi from other kanji
-        const otherKuns: string[] = [];
-        for (const k of kanjiList) {
-          if (k.id !== target.id) {
-            for (const r of k.kun) {
-              if (!target.kun.includes(r) && !otherKuns.includes(r)) {
-                otherKuns.push(r);
-              }
-            }
-          }
-          if (otherKuns.length >= 20) break;
-        }
-
-        const shuffledKuns = otherKuns.sort(() => Math.random() - 0.5).slice(0, 3);
-        const rawOptions: QuizOption[] = [
-          {
-            id: `kun-correct-${correctReading}`,
-            primaryText: correctReading,
-            isKanji: false,
-            isCorrect: true,
-            audioText: correctReading,
-          },
-          ...shuffledKuns.map((r, i) => ({
-            id: `kun-distractor-${i}-${r}`,
-            primaryText: r,
-            isKanji: false,
-            isCorrect: false,
-            audioText: r,
-          })),
-        ].sort(() => Math.random() - 0.5);
-
-        return {
-          id: `${target.id}-kanji-to-kun-${Date.now()}`,
-          type: chosenType,
-          promptCategory: 'Kanji → Kunyomi',
-          promptQuestion: 'Chọn âm đọc Kunyomi tiếng Nhật cho chữ Hán:',
-          promptMain: target.c,
-          promptSub: `Hán Việt: ${target.hv.join(' • ')} (${target.m_vi.slice(0, 2).join(', ')})`,
-          promptAudio: target.c,
-          targetKanji: target,
-          options: rawOptions,
-        };
-      }
-
-      case 'kanji-to-onyomi': {
-        const onList = target.on.length > 0 ? target.on : ['—'];
-        const correctReading = onList[Math.floor(Math.random() * onList.length)];
-
-        // Gather distractors onyomi from other kanji
-        const otherOns: string[] = [];
-        for (const k of kanjiList) {
-          if (k.id !== target.id) {
-            for (const r of k.on) {
-              if (!target.on.includes(r) && !otherOns.includes(r)) {
-                otherOns.push(r);
-              }
-            }
-          }
-          if (otherOns.length >= 20) break;
-        }
-
-        const shuffledOns = otherOns.sort(() => Math.random() - 0.5).slice(0, 3);
-        const rawOptions: QuizOption[] = [
-          {
-            id: `on-correct-${correctReading}`,
-            primaryText: correctReading,
-            isKanji: false,
-            isCorrect: true,
-            audioText: correctReading,
-          },
-          ...shuffledOns.map((r, i) => ({
-            id: `on-distractor-${i}-${r}`,
-            primaryText: r,
-            isKanji: false,
-            isCorrect: false,
-            audioText: r,
-          })),
-        ].sort(() => Math.random() - 0.5);
-
-        return {
-          id: `${target.id}-kanji-to-on-${Date.now()}`,
-          type: chosenType,
-          promptCategory: 'Kanji → Onyomi',
-          promptQuestion: 'Chọn âm đọc Onyomi Katakana cho chữ Hán:',
-          promptMain: target.c,
-          promptSub: `Hán Việt: ${target.hv.join(' • ')} (${target.m_vi.slice(0, 2).join(', ')})`,
-          promptAudio: target.c,
-          targetKanji: target,
-          options: rawOptions,
-        };
-      }
-
-      case 'kanji-to-meaning':
-      default: {
-        // Pick 3 distractors with different meanings/HV
-        const validDistractors = kanjiList.filter(
-          (k) => k.id !== target.id && k.hv.join('') !== target.hv.join('')
-        );
-        const shuffledDistractors = [...validDistractors].sort(() => Math.random() - 0.5).slice(0, 3);
-
-        const rawOptions: QuizOption[] = [
-          {
-            id: target.id,
-            primaryText: target.hv.join(' • '),
-            secondaryText: target.m_vi.join(', '),
-            isKanji: false,
-            isCorrect: true,
-            audioText: target.c,
-          },
-          ...shuffledDistractors.map((d) => ({
-            id: d.id,
-            primaryText: d.hv.join(' • '),
-            secondaryText: d.m_vi.join(', '),
-            isKanji: false,
-            isCorrect: false,
-            audioText: d.c,
-          })),
-        ].sort(() => Math.random() - 0.5);
-
-        return {
-          id: `${target.id}-kanji-to-meaning-${Date.now()}`,
-          type: chosenType,
-          promptCategory: 'Kanji → Hán Việt & Nghĩa',
-          promptQuestion: 'Chọn âm Hán Việt & nghĩa đúng cho chữ Kanji:',
-          promptMain: target.c,
-          promptSub: `${target.lvl} • ${target.st} nét • Bộ ${target.rad}`,
-          promptAudio: target.c,
-          targetKanji: target,
-          options: rawOptions,
-        };
-      }
-    }
-  }, [kanjiList, selectedTypes, pools]);
-
   // Start a new Quiz session
   const startQuiz = () => {
+    const deck = buildQuizDeck(kanjiList, Array.from(selectedTypes), questionLimit);
+    if (deck.length === 0) {
+      alert('Không đủ dữ liệu Kanji phù hợp với các dạng câu hỏi đã chọn trong bộ lọc hiện tại.');
+      return;
+    }
+
+    setQuizDeck(deck);
+    setCurrentQuestionIndex(0);
     setScore(0);
     setStreak(0);
     setMaxStreak(0);
-    setCurrentQuestionIndex(0);
     setHistory([]);
     setSelectedOption(null);
     setIsAnswered(false);
-
-    const firstQ = generateNewQuestion();
-    setCurrentQuestion(firstQ);
     setGameState('playing');
   };
 
-  // Next Question or Finish
+  // Advance to next question or show summary
   const handleAdvance = () => {
     const nextIndex = currentQuestionIndex + 1;
-    if (nextIndex >= questionLimit) {
-      // Reached limit!
+    if (nextIndex >= quizDeck.length) {
       setGameState('summary');
-      if (score / questionLimit >= 0.7) {
+      if (score / quizDeck.length >= 0.7) {
         confetti({
           particleCount: 80,
           spread: 70,
@@ -478,12 +505,10 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
       setCurrentQuestionIndex(nextIndex);
       setSelectedOption(null);
       setIsAnswered(false);
-      const nextQ = generateNewQuestion();
-      setCurrentQuestion(nextQ);
     }
   };
 
-  // Quit / Exit Early
+  // Quit early
   const handleQuitEarly = () => {
     if (history.length > 0) {
       setGameState('summary');
@@ -494,7 +519,8 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
 
   // Handle Option Click
   const handleSelectOption = (opt: QuizOption) => {
-    if (isAnswered || !currentQuestion) return;
+    const currentQ = quizDeck[currentQuestionIndex];
+    if (isAnswered || !currentQ) return;
 
     setSelectedOption(opt);
     setIsAnswered(true);
@@ -520,12 +546,14 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
     setHistory((prev) => [
       ...prev,
       {
-        question: currentQuestion,
+        question: currentQ,
         selectedOption: opt,
         isCorrect,
       },
     ]);
   };
+
+  const currentQuestion = quizDeck[currentQuestionIndex];
 
   // Keyboard Navigation: 1, 2, 3, 4, Enter/Space
   useEffect(() => {
@@ -569,13 +597,13 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
               <div>
                 <h2 className="text-lg font-bold text-zinc-100">Cấu hình bài trắc nghiệm</h2>
                 <p className="text-xs text-zinc-400">
-                  Tùy chỉnh dạng câu hỏi và giới hạn số câu theo nhu cầu ôn tập
+                  Tùy chỉnh dạng câu hỏi và giới hạn số câu (đảm bảo không lặp lại chữ Hán)
                 </p>
               </div>
             </div>
 
             <span className="text-xs font-mono text-zinc-400 bg-zinc-800 px-2.5 py-1 rounded-lg border border-zinc-700">
-              {kanjiList.length} chữ trong bộ lọc
+              {maxAvailable} chữ trong bộ lọc
             </span>
           </div>
 
@@ -640,34 +668,49 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
 
           {/* 2. Question Limit Selection */}
           <div className="space-y-3 mb-8">
-            <label className="text-xs font-mono uppercase tracking-wider text-zinc-400 block">
-              Giới hạn số câu hỏi:
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-mono uppercase tracking-wider text-zinc-400 block">
+                Giới hạn số câu hỏi:
+              </label>
+              <span className="text-[11px] text-zinc-500 font-mono">
+                Mỗi câu hỏi 1 chữ Hán riêng biệt
+              </span>
+            </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {[5, 10, 15, 20, 30, 50].map((num) => (
-                <button
-                  key={num}
-                  type="button"
-                  onClick={() => setQuestionLimit(num)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-mono font-medium border transition ${
-                    questionLimit === num
-                      ? 'bg-blue-600 text-white border-blue-500 font-bold shadow-md shadow-blue-950/40'
-                      : 'bg-zinc-950/60 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200'
-                  }`}
-                >
-                  {num} câu
-                </button>
-              ))}
+              {[5, 10, 15, 20, 30, 50].map((num) => {
+                const isPossible = num <= maxAvailable;
+                return (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => isPossible && setQuestionLimit(num)}
+                    disabled={!isPossible}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-mono font-medium border transition ${
+                      questionLimit === num
+                        ? 'bg-blue-600 text-white border-blue-500 font-bold shadow-md shadow-blue-950/40'
+                        : isPossible
+                        ? 'bg-zinc-950/60 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200'
+                        : 'bg-zinc-950/30 text-zinc-600 border-zinc-900 opacity-40 cursor-not-allowed'
+                    }`}
+                  >
+                    {num} câu
+                  </button>
+                );
+              })}
 
               <div className="flex items-center gap-1.5 ml-auto">
                 <span className="text-xs text-zinc-400">Tùy chọn:</span>
                 <input
                   type="number"
                   min="3"
-                  max="100"
-                  value={questionLimit}
-                  onChange={(e) => setQuestionLimit(Math.max(3, Math.min(100, parseInt(e.target.value) || 10)))}
+                  max={maxAvailable}
+                  value={Math.min(questionLimit, maxAvailable)}
+                  onChange={(e) =>
+                    setQuestionLimit(
+                      Math.max(3, Math.min(maxAvailable, parseInt(e.target.value) || 10))
+                    )
+                  }
                   className="w-16 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-center font-mono text-zinc-200 focus:outline-none focus:border-zinc-600"
                 />
               </div>
@@ -681,7 +724,9 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
             className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 active:scale-98 text-white font-medium text-sm rounded-xl transition shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2"
           >
             <Play className="w-4 h-4 fill-current" />
-            <span>Bắt đầu bài trắc nghiệm ({questionLimit} câu)</span>
+            <span>
+              Bắt đầu bài trắc nghiệm ({Math.min(questionLimit, maxAvailable)} câu duy nhất)
+            </span>
           </button>
         </div>
       </div>
@@ -705,7 +750,7 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
             {percentage >= 80 ? 'Xuất sắc!' : percentage >= 50 ? 'Làm tốt lắm!' : 'Cần cố gắng thêm!'}
           </h2>
           <p className="text-xs text-zinc-400 mb-6">
-            Đã hoàn thành {totalQuestions} câu hỏi trắc nghiệm
+            Đã hoàn thành {totalQuestions} câu hỏi trắc nghiệm không lặp lại
           </p>
 
           {/* Stats Bar */}
@@ -718,7 +763,11 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
             </div>
             <div>
               <span className="text-[10px] text-zinc-500 font-mono uppercase block">Tỷ lệ đúng</span>
-              <span className={`text-xl font-bold font-mono ${percentage >= 70 ? 'text-emerald-400' : 'text-amber-400'}`}>
+              <span
+                className={`text-xl font-bold font-mono ${
+                  percentage >= 70 ? 'text-emerald-400' : 'text-amber-400'
+                }`}
+              >
                 {percentage}%
               </span>
             </div>
@@ -786,7 +835,7 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
               className="py-3 px-4 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-xl transition flex items-center justify-center gap-1.5 shadow-md shadow-blue-900/40"
             >
               <RotateCcw className="w-4 h-4" />
-              <span>Làm lại bài thi này</span>
+              <span>Làm bài thi mới (Bộ chữ khác)</span>
             </button>
           </div>
         </div>
@@ -804,12 +853,12 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
         {/* Left: Progress count */}
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono font-bold text-zinc-200 bg-zinc-800 px-2.5 py-1 rounded-lg border border-zinc-700">
-            Câu {currentQuestionIndex + 1} / {questionLimit}
+            Câu {currentQuestionIndex + 1} / {quizDeck.length}
           </span>
           <div className="w-24 sm:w-32 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
             <div
               className="h-full bg-blue-500 transition-all duration-200"
-              style={{ width: `${((currentQuestionIndex + 1) / questionLimit) * 100}%` }}
+              style={{ width: `${((currentQuestionIndex + 1) / quizDeck.length) * 100}%` }}
             />
           </div>
         </div>
@@ -883,10 +932,12 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
         {currentQuestion.options.map((opt, idx) => {
           const isSelected = selectedOption?.id === opt.id;
 
-          let btnStyle = 'bg-zinc-900/70 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 text-zinc-200';
+          let btnStyle =
+            'bg-zinc-900/70 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 text-zinc-200';
           if (isAnswered) {
             if (opt.isCorrect) {
-              btnStyle = 'bg-emerald-950/40 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-950/30';
+              btnStyle =
+                'bg-emerald-950/40 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-950/30';
             } else if (isSelected) {
               btnStyle = 'bg-rose-950/40 border-rose-500 text-rose-300';
             } else {
@@ -944,7 +995,9 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
             className="px-6 py-3 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-medium text-sm rounded-xl transition shadow-lg shadow-blue-900/40 flex items-center gap-2"
           >
             <span>
-              {currentQuestionIndex + 1 >= questionLimit ? 'Xem kết quả tổng kết' : 'Câu tiếp theo'}
+              {currentQuestionIndex + 1 >= quizDeck.length
+                ? 'Xem kết quả tổng kết'
+                : 'Câu tiếp theo'}
             </span>
             <span className="text-xs font-mono opacity-80">[Enter]</span>
             <ArrowRight className="w-4 h-4" />
