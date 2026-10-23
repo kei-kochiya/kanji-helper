@@ -220,12 +220,12 @@ export function App() {
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
         {/* Controls Section (Always visible across all modes for filtering) */}
-        <div className="bg-zinc-950/70 p-4 sm:p-5 rounded-2xl border border-zinc-800/80 mb-6 space-y-4">
+        <div className="bg-[#10131d]/90 p-4 sm:p-5 rounded-2xl border border-white/[0.08] mb-6 space-y-4 shadow-sm">
           {/* Top Row: Search input & Status Filter pills */}
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
             {/* Search Input */}
             <div className="relative flex-1 max-w-lg">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
               <input
                 ref={searchInputRef}
                 type="text"
@@ -235,29 +235,31 @@ export function App() {
                   setDisplayLimit(ITEMS_PER_PAGE);
                 }}
                 placeholder="Tìm chữ Kanji, âm Hán Việt (vd: NHẬT, HỌC), nghĩa, On/Kun..."
-                className="w-full bg-zinc-900/90 text-sm text-zinc-100 placeholder:text-zinc-500 pl-10 pr-10 py-2.5 rounded-xl border border-zinc-800 focus:border-zinc-600 focus:outline-none transition shadow-inner"
+                className="w-full bg-[#0a0c12] text-sm text-zinc-100 placeholder:text-zinc-500 pl-10 pr-10 py-2.5 rounded-xl border border-white/[0.08] focus:border-blue-500/60 focus:outline-none transition shadow-inner"
               />
               {searchQuery ? (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                  aria-label="Xóa từ khóa tìm kiếm"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 cursor-pointer p-1"
                 >
                   <X className="w-4 h-4" />
                 </button>
               ) : (
-                <span className="hidden sm:inline-block absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-700">
+                <span className="hidden sm:inline-block absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-zinc-400 bg-zinc-800/80 px-1.5 py-0.5 rounded border border-white/[0.08] select-none">
                   /
                 </span>
               )}
             </div>
 
             {/* Quick Status Filters */}
-            <div className="flex items-center gap-1.5 bg-zinc-900/80 p-1 rounded-xl border border-zinc-800 shrink-0">
+            <div className="flex items-center gap-1.5 bg-[#0a0c12]/80 p-1 rounded-xl border border-white/[0.08] shrink-0">
               <button
                 onClick={() => setStatusFilter('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                aria-pressed={statusFilter === 'all'}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
                   statusFilter === 'all'
-                    ? 'bg-zinc-800 text-white shadow-sm'
+                    ? 'bg-zinc-800 text-white shadow-sm border border-white/[0.08]'
                     : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
@@ -266,9 +268,10 @@ export function App() {
 
               <button
                 onClick={() => setStatusFilter('starred')}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                aria-pressed={statusFilter === 'starred'}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
                   statusFilter === 'starred'
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                     : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
@@ -278,9 +281,10 @@ export function App() {
 
               <button
                 onClick={() => setStatusFilter('unmastered')}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                aria-pressed={statusFilter === 'unmastered'}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
                   statusFilter === 'unmastered'
-                    ? 'bg-zinc-800 text-zinc-200'
+                    ? 'bg-zinc-800 text-zinc-200 border border-white/[0.08]'
                     : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
@@ -289,9 +293,10 @@ export function App() {
 
               <button
                 onClick={() => setStatusFilter('mastered')}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                aria-pressed={statusFilter === 'mastered'}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
                   statusFilter === 'mastered'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                     : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
@@ -302,7 +307,7 @@ export function App() {
           </div>
 
           {/* Bottom Row: Multi-Level Filters & Sorting */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t border-zinc-850">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t border-white/[0.06]">
             {/* Multi-Level Selector */}
             <LevelFilter
               selectedLevels={selectedLevels}
@@ -314,14 +319,15 @@ export function App() {
 
             {/* Sort Dropdown */}
             <div className="flex items-center gap-2 self-end md:self-auto">
-              <span className="text-xs font-mono text-zinc-500 flex items-center gap-1">
+              <span className="text-xs font-mono text-zinc-400 flex items-center gap-1 select-none">
                 <ArrowUpDown className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Sắp xếp:</span>
               </span>
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as SortOption)}
-                className="bg-zinc-900 text-xs text-zinc-300 py-1.5 px-2.5 rounded-lg border border-zinc-800 focus:outline-none focus:border-zinc-700 font-medium"
+                aria-label="Tùy chọn sắp xếp chữ Hán"
+                className="bg-[#0a0c12] text-xs text-zinc-300 py-1.5 px-2.5 rounded-lg border border-white/[0.08] focus:outline-none focus:border-zinc-500 font-medium cursor-pointer"
               >
                 <option value="default">Mặc định (N5 → N1)</option>
                 <option value="strokes_asc">Số nét (Tăng dần)</option>
@@ -338,14 +344,14 @@ export function App() {
             {/* Result Header Count */}
             <div className="flex items-center justify-between mb-4 px-1 text-xs text-zinc-400">
               <span className="font-mono">
-                Hiển thị <strong className="text-zinc-200">{Math.min(filteredKanji.length, displayLimit)}</strong> /{' '}
-                <strong className="text-zinc-200">{filteredKanji.length}</strong> chữ Hán
+                Hiển thị <strong className="text-zinc-100">{Math.min(filteredKanji.length, displayLimit)}</strong> /{' '}
+                <strong className="text-zinc-100">{filteredKanji.length}</strong> chữ Hán
               </span>
 
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="text-blue-400 hover:underline flex items-center gap-1"
+                  className="text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <RefreshCw className="w-3 h-3" />
                   <span>Xóa tìm kiếm</span>
@@ -355,10 +361,10 @@ export function App() {
 
             {/* Empty State */}
             {filteredKanji.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24 text-center bg-zinc-950/40 rounded-2xl border border-zinc-850">
-                <AlertCircle className="w-10 h-10 text-zinc-600 mb-3" />
-                <h3 className="text-base font-semibold text-zinc-300">Không tìm thấy chữ Kanji nào</h3>
-                <p className="text-xs text-zinc-500 max-w-md mt-1">
+              <div className="flex flex-col items-center justify-center py-24 text-center bg-[#10131d]/50 rounded-2xl border border-white/[0.08]">
+                <AlertCircle className="w-10 h-10 text-zinc-500 mb-3" />
+                <h3 className="text-base font-semibold text-zinc-200">Không tìm thấy chữ Kanji nào</h3>
+                <p className="text-xs text-zinc-400 max-w-md mt-1 font-normal">
                   Vui lòng thử từ khóa khác hoặc bật thêm cấp độ N5–N1 trong thanh bộ lọc bên trên.
                 </p>
               </div>
@@ -383,7 +389,7 @@ export function App() {
                   <div className="flex justify-center mt-8">
                     <button
                       onClick={() => setDisplayLimit((prev) => prev + ITEMS_PER_PAGE)}
-                      className="px-6 py-2.5 bg-zinc-900 hover:bg-zinc-850 text-xs font-mono text-zinc-300 hover:text-white rounded-xl border border-zinc-800 hover:border-zinc-700 transition shadow-sm"
+                      className="px-6 py-2.5 bg-[#121520] hover:bg-[#181c2b] text-xs font-mono text-zinc-300 hover:text-white rounded-xl border border-white/[0.08] hover:border-white/[0.18] transition cursor-pointer active:scale-[0.98] shadow-sm"
                     >
                       Tải thêm {Math.min(ITEMS_PER_PAGE, filteredKanji.length - displayLimit)} chữ tiếp theo
                     </button>
@@ -434,7 +440,7 @@ export function App() {
       )}
 
       {/* Footer */}
-      <footer className="mt-auto border-t border-zinc-800/80 bg-zinc-950/60 py-6 text-center text-xs text-zinc-500 font-mono">
+      <footer className="mt-auto border-t border-white/[0.08] bg-[#090a0f]/90 py-6 text-center text-xs text-zinc-400 font-mono">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div>
             Kanji Helper • N5 → N1 ({KANJI_DATA.length.toLocaleString()} Hán tự chuẩn)

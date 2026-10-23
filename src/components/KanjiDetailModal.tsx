@@ -56,16 +56,22 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
   const levelStyle = LEVEL_COLORS[kanji.lvl] || LEVEL_COLORS.N5;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="kanji-detail-title"
+    >
       <div
-        className="relative w-full max-w-2xl bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col"
+        className="relative w-full max-w-2xl bg-[#0f121b] border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800/80 bg-zinc-900/80">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/[0.08] bg-[#0c0e16]/90">
           <div className="flex items-center gap-3">
             <span
-              className={`text-xs font-mono font-semibold px-2.5 py-0.5 rounded-full border ${levelStyle.badge}`}
+              className={`text-xs font-mono font-semibold px-2.5 py-0.5 rounded-full border ${levelStyle.badge} select-none`}
             >
               {kanji.lvl}
             </span>
@@ -78,8 +84,9 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
             {onPrev && (
               <button
                 onClick={onPrev}
+                aria-label="Chữ Hán trước"
                 title="Chữ trước (Phím mũi tên Trái)"
-                className="p-1.5 text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-lg transition"
+                className="p-1.5 text-zinc-400 hover:text-white bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg border border-white/[0.08] transition cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
@@ -87,8 +94,9 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
             {onNext && (
               <button
                 onClick={onNext}
+                aria-label="Chữ Hán tiếp theo"
                 title="Chữ tiếp theo (Phím mũi tên Phải)"
-                className="p-1.5 text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-lg transition"
+                className="p-1.5 text-zinc-400 hover:text-white bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg border border-white/[0.08] transition cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -96,22 +104,27 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
 
             <button
               onClick={() => onToggleStar(kanji.id)}
-              className={`p-1.5 rounded-lg border transition ${
+              aria-label={isStarred ? 'Bỏ lưu' : 'Lưu chữ Kanji này'}
+              className={`p-1.5 rounded-lg border transition cursor-pointer ${
                 isStarred
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                  : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white'
+                  ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                  : 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:text-white'
               }`}
               title={isStarred ? 'Bỏ lưu' : 'Lưu Kanji này'}
             >
-              {isStarred ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+              {isStarred ? (
+                <BookmarkCheck className="w-4 h-4 fill-amber-400/20" />
+              ) : (
+                <Bookmark className="w-4 h-4" />
+              )}
             </button>
 
             <button
               onClick={() => onToggleMaster(kanji.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition cursor-pointer ${
                 isMastered
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                  : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white'
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                  : 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:text-white'
               }`}
             >
               <CheckCircle2 className="w-4 h-4" />
@@ -120,7 +133,8 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
 
             <button
               onClick={onClose}
-              className="p-1.5 text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 rounded-lg transition ml-2"
+              aria-label="Đóng cửa sổ chi tiết (Esc)"
+              className="p-1.5 text-zinc-400 hover:text-white bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg border border-white/[0.08] transition ml-1 cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -128,19 +142,23 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 overflow-y-auto space-y-6">
+        <div className="p-5 sm:p-6 overflow-y-auto space-y-5">
           {/* Main Hero: Character & Stroke Animation */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center bg-zinc-950/70 p-5 rounded-xl border border-zinc-800/80">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center bg-[#0a0c12]/80 p-5 rounded-2xl border border-white/[0.08]">
             {/* Left: Big Kanji & Pronunciation */}
             <div className="flex flex-col items-center justify-center text-center">
               <div className="relative group">
-                <span className="text-8xl font-kanji text-zinc-100 select-none block leading-tight">
+                <span
+                  id="kanji-detail-title"
+                  className="text-8xl font-kanji text-zinc-100 select-none block leading-tight drop-shadow-sm"
+                >
                   {kanji.c}
                 </span>
                 <button
                   onClick={handleCopy}
+                  aria-label="Sao chép chữ Hán vào bộ nhớ tạm"
                   title="Sao chép chữ Hán"
-                  className="absolute top-0 right-0 p-1.5 bg-zinc-800/80 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition"
+                  className="absolute -top-1 -right-4 p-1.5 bg-zinc-800/90 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition cursor-pointer border border-white/[0.08]"
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
@@ -152,7 +170,8 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
                 </span>
                 <button
                   onClick={() => speakJapanese(kanji.c)}
-                  className="p-1.5 text-zinc-400 hover:text-blue-400 bg-zinc-800/80 hover:bg-zinc-800 rounded-lg transition"
+                  aria-label={`Phát âm chữ ${kanji.c}`}
+                  className="p-1.5 text-zinc-400 hover:text-blue-400 bg-zinc-800/80 hover:bg-zinc-700 rounded-lg transition cursor-pointer border border-white/[0.06]"
                   title="Nghe phát âm"
                 >
                   <Volume2 className="w-4 h-4" />
@@ -175,7 +194,7 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
             <h3 className="text-xs font-mono uppercase tracking-wider text-zinc-400">
               Ý nghĩa tiếng Việt
             </h3>
-            <div className="bg-zinc-950/60 p-4 rounded-xl border border-zinc-800/80">
+            <div className="bg-[#0a0c12]/60 p-4 rounded-xl border border-white/[0.08]">
               <ul className="space-y-1.5">
                 {kanji.m_vi.map((m, idx) => (
                   <li key={idx} className="text-sm text-zinc-200 flex items-start gap-2">
@@ -185,7 +204,7 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
                 ))}
               </ul>
               {kanji.m_en && kanji.m_en.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-zinc-800/60 text-xs text-zinc-400">
+                <div className="mt-3 pt-3 border-t border-white/[0.06] text-xs text-zinc-400">
                   <span className="font-mono text-zinc-500 mr-2">English:</span>
                   {kanji.m_en.join(', ')}
                 </div>
@@ -195,7 +214,7 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
 
           {/* Section: Readings (On / Kun) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-zinc-950/60 p-4 rounded-xl border border-zinc-800/80">
+            <div className="bg-[#0a0c12]/60 p-4 rounded-xl border border-white/[0.08]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">
                   Âm On (Onyomi - Katakana)
@@ -203,7 +222,8 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
                 {kanji.on.length > 0 && (
                   <button
                     onClick={() => speakJapanese(kanji.on[0])}
-                    className="text-zinc-500 hover:text-blue-400 transition"
+                    aria-label={`Nghe âm On ${kanji.on[0]}`}
+                    className="text-zinc-400 hover:text-blue-400 transition cursor-pointer"
                     title="Nghe âm On"
                   >
                     <Volume2 className="w-3.5 h-3.5" />
@@ -213,14 +233,15 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
               <div className="flex flex-wrap gap-2">
                 {kanji.on.length > 0 ? (
                   kanji.on.map((reading, i) => (
-                    <span
+                    <button
                       key={i}
+                      type="button"
                       onClick={() => speakJapanese(reading)}
-                      className="px-2.5 py-1 text-sm font-kanji bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-lg cursor-pointer hover:border-zinc-700 hover:text-blue-300 transition"
+                      className="px-2.5 py-1 text-sm font-kanji bg-zinc-900/90 border border-white/[0.08] text-zinc-200 rounded-lg cursor-pointer hover:border-blue-500/50 hover:text-blue-300 transition"
                       title="Nhấn để nghe"
                     >
                       {reading}
-                    </span>
+                    </button>
                   ))
                 ) : (
                   <span className="text-xs text-zinc-500 italic">Không có âm On thông dụng</span>
@@ -228,7 +249,7 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
               </div>
             </div>
 
-            <div className="bg-zinc-950/60 p-4 rounded-xl border border-zinc-800/80">
+            <div className="bg-[#0a0c12]/60 p-4 rounded-xl border border-white/[0.08]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">
                   Âm Kun (Kunyomi - Hiragana)
@@ -236,7 +257,8 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
                 {kanji.kun.length > 0 && (
                   <button
                     onClick={() => speakJapanese(kanji.kun[0])}
-                    className="text-zinc-500 hover:text-blue-400 transition"
+                    aria-label={`Nghe âm Kun ${kanji.kun[0]}`}
+                    className="text-zinc-400 hover:text-blue-400 transition cursor-pointer"
                     title="Nghe âm Kun"
                   >
                     <Volume2 className="w-3.5 h-3.5" />
@@ -246,14 +268,15 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
               <div className="flex flex-wrap gap-2">
                 {kanji.kun.length > 0 ? (
                   kanji.kun.map((reading, i) => (
-                    <span
+                    <button
                       key={i}
+                      type="button"
                       onClick={() => speakJapanese(reading)}
-                      className="px-2.5 py-1 text-sm font-kanji bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-lg cursor-pointer hover:border-zinc-700 hover:text-blue-300 transition"
+                      className="px-2.5 py-1 text-sm font-kanji bg-zinc-900/90 border border-white/[0.08] text-zinc-200 rounded-lg cursor-pointer hover:border-blue-500/50 hover:text-blue-300 transition"
                       title="Nhấn để nghe"
                     >
                       {reading}
-                    </span>
+                    </button>
                   ))
                 ) : (
                   <span className="text-xs text-zinc-500 italic">Không có âm Kun thông dụng</span>
@@ -272,8 +295,9 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
                 {kanji.words.map((word, idx) => (
                   <button
                     key={idx}
+                    type="button"
                     onClick={() => speakJapanese(word)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950/70 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded-lg text-xs font-kanji text-zinc-300 transition"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0a0c12]/80 hover:bg-zinc-800 border border-white/[0.08] hover:border-white/[0.18] rounded-lg text-xs font-kanji text-zinc-300 transition cursor-pointer active:scale-[0.98]"
                     title="Nhấn để phát âm từ ghép"
                   >
                     <span>{word}</span>
