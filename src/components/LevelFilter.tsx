@@ -1,5 +1,6 @@
 import React from 'react';
 import type { JLPTLevel } from '../types/kanji';
+import { ALL_LEVELS, LEVEL_STYLES } from '../utils/levels';
 
 interface LevelFilterProps {
   selectedLevels: Set<JLPTLevel>;
@@ -9,30 +10,9 @@ interface LevelFilterProps {
   levelCounts: Record<JLPTLevel, number>;
 }
 
-const ALL_LEVELS: JLPTLevel[] = ['N5', 'N4', 'N3', 'N2', 'N1'];
-
-const LEVEL_THEMES: Record<JLPTLevel, { active: string; idle: string }> = {
-  N5: {
-    active: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/50 shadow-sm shadow-emerald-950/40',
-    idle: 'bg-zinc-900/60 text-zinc-400 border-white/[0.08] hover:border-white/[0.16] hover:text-zinc-200',
-  },
-  N4: {
-    active: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/50 shadow-sm shadow-cyan-950/40',
-    idle: 'bg-zinc-900/60 text-zinc-400 border-white/[0.08] hover:border-white/[0.16] hover:text-zinc-200',
-  },
-  N3: {
-    active: 'bg-blue-500/15 text-blue-300 border-blue-500/50 shadow-sm shadow-blue-950/40',
-    idle: 'bg-zinc-900/60 text-zinc-400 border-white/[0.08] hover:border-white/[0.16] hover:text-zinc-200',
-  },
-  N2: {
-    active: 'bg-purple-500/15 text-purple-300 border-purple-500/50 shadow-sm shadow-purple-950/40',
-    idle: 'bg-zinc-900/60 text-zinc-400 border-white/[0.08] hover:border-white/[0.16] hover:text-zinc-200',
-  },
-  N1: {
-    active: 'bg-rose-500/15 text-rose-300 border-rose-500/50 shadow-sm shadow-rose-950/40',
-    idle: 'bg-zinc-900/60 text-zinc-400 border-white/[0.08] hover:border-white/[0.16] hover:text-zinc-200',
-  },
-};
+const chipBase =
+  'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium border tabular-nums cursor-pointer transition-colors';
+const chipIdle = 'border-line text-paper-2 hover:border-line-strong hover:text-paper';
 
 export const LevelFilter: React.FC<LevelFilterProps> = ({
   selectedLevels,
@@ -45,42 +25,35 @@ export const LevelFilter: React.FC<LevelFilterProps> = ({
   const totalCount = Object.values(levelCounts).reduce((a, b) => a + b, 0);
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs font-mono uppercase tracking-wider text-zinc-400 mr-1 select-none">
-        Cấp độ:
-      </span>
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Lọc theo cấp độ JLPT">
+      <span className="text-xs text-paper-3 mr-1 select-none">Cấp độ</span>
 
-      {/* Select All pill */}
       <button
+        type="button"
         onClick={isAllSelected ? onClearAll : onSelectAll}
         aria-pressed={isAllSelected}
-        className={`px-3 py-1.5 rounded-lg text-xs font-medium border cursor-pointer active:scale-[0.97] transition-all duration-150 ${
-          isAllSelected
-            ? 'bg-zinc-100 text-zinc-900 border-white font-semibold shadow-sm'
-            : 'bg-zinc-900/80 text-zinc-400 border-white/[0.08] hover:border-white/[0.16] hover:text-zinc-200'
-        }`}
+        title={isAllSelected ? 'Chỉ giữ N5' : 'Chọn tất cả cấp độ'}
+        className={`${chipBase} ${isAllSelected ? 'bg-paper text-ink-950 border-paper font-semibold' : chipIdle}`}
       >
-        Tất cả ({totalCount})
+        Tất cả
+        <span className="opacity-70">{totalCount.toLocaleString('vi-VN')}</span>
       </button>
 
-      {/* N5 to N1 Chips (Multi-selectable) */}
       {ALL_LEVELS.map((lvl) => {
         const isSelected = selectedLevels.has(lvl);
-        const theme = LEVEL_THEMES[lvl];
-        const count = levelCounts[lvl] || 0;
-
+        const style = LEVEL_STYLES[lvl];
         return (
           <button
             key={lvl}
+            type="button"
             onClick={() => onToggleLevel(lvl)}
             aria-pressed={isSelected}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium border flex items-center gap-1.5 cursor-pointer active:scale-[0.97] transition-all duration-150 ${
-              isSelected ? theme.active : theme.idle
-            }`}
             title={`Bật/tắt cấp độ ${lvl}`}
+            className={`${chipBase} ${isSelected ? style.chip : chipIdle}`}
           >
-            <span className="font-bold">{lvl}</span>
-            <span className="text-[10px] opacity-75 font-sans">({count})</span>
+            <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} aria-hidden="true" />
+            <span className="font-semibold">{lvl}</span>
+            <span className="opacity-70">{(levelCounts[lvl] || 0).toLocaleString('vi-VN')}</span>
           </button>
         );
       })}

@@ -11,7 +11,7 @@ export function speakJapanese(text: string, rate: number = 0.9): void {
   window.speechSynthesis.cancel();
 
   // Strip leading punctuation or dots e.g. "まな.ぶ" -> "まなぶ", "-び" -> "び"
-  const cleanText = text.replace(/[\.\-\–]/g, '').trim();
+  const cleanText = text.replace(/[.\-–]/g, '').trim();
   if (!cleanText) return;
 
   const utterance = new SpeechSynthesisUtterance(cleanText);

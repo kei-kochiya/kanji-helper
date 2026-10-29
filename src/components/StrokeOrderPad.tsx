@@ -1,8 +1,9 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { Eraser, Volume2, Bookmark, BookmarkCheck, CheckCircle2, ChevronLeft, ChevronRight, Eye, EyeOff } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Eraser, Volume2, Bookmark, CheckCircle2, ChevronLeft, ChevronRight, Eye, EyeOff, Undo2 } from 'lucide-react';
 import type { KanjiItem } from '../types/kanji';
 import { StrokePlayer } from './StrokePlayer';
 import { speakJapanese } from '../utils/speech';
+import { LEVEL_STYLES, levelLabelClass } from '../utils/levels';
 
 interface StrokeOrderPadProps {
   kanjiList: KanjiItem[];
@@ -14,6 +15,12 @@ interface StrokeOrderPadProps {
   onToggleMaster: (id: string) => void;
 }
 
+const isTypingTarget = (el: EventTarget | null) =>
+  el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+
+const iconButton =
+  'grid place-items-center w-9 h-9 rounded-lg text-paper-2 hover:text-paper hover:bg-ink-850 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer';
+
 export const StrokeOrderPad: React.FC<StrokeOrderPadProps> = ({
   kanjiList,
   currentIndex,
@@ -24,266 +31,293 @@ export const StrokeOrderPad: React.FC<StrokeOrderPadProps> = ({
   onToggleMaster,
 }) => {
   const currentKanji = kanjiList[currentIndex];
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [showGuide, setShowGuide] = useState(true);
+  const canPrev = currentIndex > 0;
+  const canNext = currentIndex < kanjiList.length - 1;
 
-  // Clear canvas when kanji changes
   useEffect(() => {
-    clearCanvas();
-  }, [currentIndex]);
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  };
-
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    setIsDrawing(true);
-    draw(e);
-  };
-
-  const stopDrawing = () => {
-    setIsDrawing(false);
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (ctx) ctx.beginPath();
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing && e.type !== 'mousedown' && e.type !== 'touchstart') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
-
-    const x = (clientX - rect.left) * (canvas.width / rect.width);
-    const y = (clientY - rect.top) * (canvas.height / rect.height);
-
-    ctx.lineWidth = 14;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#60a5fa'; // Refined sky blue ink
-
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || isTypingTarget(e.target)) return;
+      if (e.key === 'ArrowLeft' && canPrev) onNavigate(currentIndex - 1);
+      if (e.key === 'ArrowRight' && canNext) onNavigate(currentIndex + 1);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentIndex, canPrev, canNext, onNavigate]);
 
   if (!currentKanji) {
     return (
-      <div className="text-center py-24 text-zinc-500 font-mono">
-        Không có chữ Kanji nào trong bộ lọc hiện tại.
+      <div className="max-w-md mx-auto text-center py-20 px-6 rounded-2xl border border-dashed border-line-strong">
+        <h2 className="text-base font-semibold text-paper">Chưa có chữ để luyện viết</h2>
+        <p className="text-sm text-paper-2 mt-1.5">Bộ lọc hiện tại không còn chữ nào. Hãy bật thêm cấp độ hoặc đổi trạng thái ở thanh lọc phía trên.</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
-      {/* Top Bar with Navigation */}
-      <div className="flex items-center justify-between bg-[#10131d]/90 p-3 rounded-2xl border border-white/[0.08] mb-6 shadow-sm">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => onNavigate(Math.max(0, currentIndex - 1))}
-            disabled={currentIndex === 0}
-            aria-label="Chữ trước"
-            className="p-2 bg-zinc-800/80 hover:bg-zinc-700/80 disabled:opacity-30 rounded-xl text-zinc-300 transition cursor-pointer active:scale-[0.96] border border-white/[0.06]"
-          >
+    <div className="max-w-5xl mx-auto">
+      {/* Navigation */}
+      <div className="flex items-center justify-between gap-3 mb-5">
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={() => onNavigate(currentIndex - 1)} disabled={!canPrev} aria-label="Chữ trước" title="Chữ trước (←)" className={iconButton}>
             <ChevronLeft className="w-5 h-5" />
           </button>
-          <span className="text-xs font-mono text-zinc-300 font-medium select-none">
-            {currentIndex + 1} / {kanjiList.length}
+          <span className="text-sm text-paper-2 tabular-nums min-w-[5.5rem] text-center select-none">
+            <span className="text-paper font-semibold">{(currentIndex + 1).toLocaleString('vi-VN')}</span> / {kanjiList.length.toLocaleString('vi-VN')}
           </span>
-          <button
-            onClick={() => onNavigate(Math.min(kanjiList.length - 1, currentIndex + 1))}
-            disabled={currentIndex === kanjiList.length - 1}
-            aria-label="Chữ tiếp theo"
-            className="p-2 bg-zinc-800/80 hover:bg-zinc-700/80 disabled:opacity-30 rounded-xl text-zinc-300 transition cursor-pointer active:scale-[0.96] border border-white/[0.06]"
-          >
+          <button type="button" onClick={() => onNavigate(currentIndex + 1)} disabled={!canNext} aria-label="Chữ tiếp theo" title="Chữ tiếp theo (→)" className={iconButton}>
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={() => onToggleStar(currentKanji.id)}
-            aria-label={isStarred ? 'Bỏ lưu' : 'Lưu chữ Kanji này'}
-            className={`p-2 rounded-xl border transition cursor-pointer active:scale-[0.96] ${
-              isStarred
-                ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
-                : 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:text-white'
-            }`}
-            title="Đánh dấu đã lưu"
+            aria-pressed={isStarred}
+            aria-label={isStarred ? 'Bỏ lưu chữ này' : 'Lưu chữ này'}
+            title={isStarred ? 'Bỏ lưu' : 'Lưu chữ này'}
+            className={`${iconButton} ${isStarred ? 'text-kin hover:text-kin' : ''}`}
           >
-            {isStarred ? (
-              <BookmarkCheck className="w-4 h-4 fill-amber-400/20" />
-            ) : (
-              <Bookmark className="w-4 h-4" />
-            )}
+            <Bookmark className={`w-4 h-4 ${isStarred ? 'fill-current' : ''}`} />
           </button>
-
           <button
+            type="button"
             onClick={() => onToggleMaster(currentKanji.id)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-xl border flex items-center gap-1.5 transition cursor-pointer active:scale-[0.96] ${
-              isMastered
-                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                : 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:text-white'
+            aria-pressed={isMastered}
+            className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              isMastered ? 'bg-ok/12 text-ok' : 'text-paper-2 hover:text-paper hover:bg-ink-850'
             }`}
           >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>{isMastered ? 'Đã thuộc' : 'Đánh dấu đã thuộc'}</span>
+            <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+            {isMastered ? 'Đã thuộc' : 'Đánh dấu thuộc'}
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-        {/* Left column: Official Stroke Order Animation & Metadata */}
-        <div className="space-y-4">
-          <div className="bg-[#10131d]/90 p-5 rounded-2xl border border-white/[0.08] shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-white/[0.08]">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+        {/* Reference: stroke order + readings */}
+        <section className="rounded-2xl bg-ink-900 border border-line p-5" aria-label="Thứ tự nét chuẩn">
+          <div className="flex items-start justify-between gap-3 mb-5">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs text-paper-3 mb-1.5">
+                <span className={levelLabelClass(currentKanji.lvl)}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${LEVEL_STYLES[currentKanji.lvl].dot}`} aria-hidden="true" />
                   {currentKanji.lvl}
                 </span>
-                <span className="text-xs text-zinc-400 ml-2 font-mono">
-                  {currentKanji.st} nét • Bộ {currentKanji.rad_vi || currentKanji.rad}
+                <span className="tabular-nums">
+                  {currentKanji.st} nét · Bộ {currentKanji.rad_vi || <span lang="ja">{currentKanji.rad}</span>}
                 </span>
               </div>
-              <button
-                onClick={() => speakJapanese(currentKanji.c)}
-                aria-label={`Phát âm chữ ${currentKanji.c}`}
-                className="p-1.5 text-zinc-400 hover:text-blue-400 bg-zinc-800/80 hover:bg-zinc-700 rounded-lg border border-white/[0.06] transition cursor-pointer"
-                title="Nghe phát âm"
-              >
-                <Volume2 className="w-4 h-4" />
-              </button>
+              <h2 className="text-2xl font-bold text-kin tracking-wide">{currentKanji.hv.join(' · ')}</h2>
+              <p className="text-sm text-paper-2 mt-1">{currentKanji.m_vi.join(', ')}</p>
             </div>
-
-            {/* KanjiVG Stroke Player */}
-            <StrokePlayer
-              code={currentKanji.code}
-              character={currentKanji.c}
-              totalStrokes={currentKanji.st}
-            />
-
-            {/* Info details */}
-            <div className="mt-4 pt-4 border-t border-white/[0.08] space-y-2.5">
-              <div className="flex items-baseline gap-2">
-                <span className="text-xs text-zinc-400 uppercase tracking-wider font-mono">Hán Việt:</span>
-                <span className="text-lg font-bold text-amber-400 tracking-wide">
-                  {currentKanji.hv.join(' • ')}
-                </span>
-              </div>
-
-              <div>
-                <span className="text-xs text-zinc-400 uppercase tracking-wider font-mono block mb-1">Nghĩa:</span>
-                <p className="text-sm text-zinc-200">
-                  {currentKanji.m_vi.join(', ')}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs pt-2">
-                <div className="bg-[#0a0c12]/80 p-2.5 rounded-xl border border-white/[0.08]">
-                  <span className="text-zinc-400 font-mono block mb-1">Âm On:</span>
-                  <span className="text-zinc-200 font-kanji font-medium">
-                    {currentKanji.on.join('、') || '—'}
-                  </span>
-                </div>
-                <div className="bg-[#0a0c12]/80 p-2.5 rounded-xl border border-white/[0.08]">
-                  <span className="text-zinc-400 font-mono block mb-1">Âm Kun:</span>
-                  <span className="text-zinc-200 font-kanji font-medium">
-                    {currentKanji.kun.join('、') || '—'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right column: Interactive Practice Writing Canvas */}
-        <div className="bg-[#10131d]/90 p-5 rounded-2xl border border-white/[0.08] shadow-sm flex flex-col items-center">
-          <div className="w-full flex items-center justify-between mb-3.5">
-            <span className="text-xs font-medium text-zinc-200">Tập viết theo nét (Canvas)</span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowGuide(!showGuide)}
-                className={`text-xs px-2.5 py-1 rounded-lg border transition cursor-pointer flex items-center gap-1 active:scale-[0.97] ${
-                  showGuide
-                    ? 'bg-zinc-800 border-white/[0.12] text-zinc-200'
-                    : 'bg-zinc-900 border-white/[0.06] text-zinc-400'
-                }`}
-              >
-                {showGuide ? <Eye className="w-3.5 h-3.5 text-zinc-300" /> : <EyeOff className="w-3.5 h-3.5 text-zinc-400" />}
-                <span>{showGuide ? 'Ẩn chữ mẫu' : 'Hiện chữ mẫu'}</span>
-              </button>
-              <button
-                onClick={clearCanvas}
-                className="text-xs px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-white/[0.08] flex items-center gap-1 transition cursor-pointer active:scale-[0.97]"
-                title="Xóa bảng vẽ"
-              >
-                <Eraser className="w-3.5 h-3.5" />
-                <span>Xóa nét</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => speakJapanese(currentKanji.c)}
+              aria-label={`Phát âm chữ ${currentKanji.c}`}
+              title="Nghe phát âm"
+              className={`${iconButton} shrink-0`}
+            >
+              <Volume2 className="w-4 h-4" />
+            </button>
           </div>
 
-          {/* Interactive Pad */}
-          <div className="relative w-72 h-72 sm:w-80 sm:h-80 bg-[#06080c] rounded-2xl border border-white/[0.1] shadow-2xl flex items-center justify-center overflow-hidden touch-none select-none">
-            {/* Guide Grid Lines */}
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="w-full h-full border border-dashed border-white/[0.05] grid grid-cols-2 grid-rows-2">
-                <div className="border-r border-b border-dashed border-white/[0.05]"></div>
-                <div className="border-b border-dashed border-white/[0.05]"></div>
-                <div className="border-r border-dashed border-white/[0.05]"></div>
-                <div></div>
-              </div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-full h-[1px] bg-white/[0.03]"></div>
-              </div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="h-full w-[1px] bg-white/[0.03]"></div>
-              </div>
+          <StrokePlayer code={currentKanji.code} character={currentKanji.c} totalStrokes={currentKanji.st} size="lg" />
+
+          <dl className="mt-5 pt-4 border-t border-line grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <dt className="text-xs text-paper-3 mb-1">Âm On</dt>
+              <dd lang="ja" className="font-jp text-paper">{currentKanji.on.join('、') || '—'}</dd>
             </div>
+            <div>
+              <dt className="text-xs text-paper-3 mb-1">Âm Kun</dt>
+              <dd lang="ja" className="font-jp text-paper">{currentKanji.kun.join('、') || '—'}</dd>
+            </div>
+          </dl>
+        </section>
 
-            {/* Faint Underlay Character Guide */}
-            {showGuide && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
-                <span className="text-[170px] sm:text-[190px] font-kanji text-zinc-800/40 leading-none">
-                  {currentKanji.c}
-                </span>
-              </div>
-            )}
-
-            {/* Drawing Canvas */}
-            <canvas
-              ref={canvasRef}
-              width={320}
-              height={320}
-              onMouseDown={startDrawing}
-              onMouseUp={stopDrawing}
-              onMouseLeave={stopDrawing}
-              onMouseMove={draw}
-              onTouchStart={startDrawing}
-              onTouchEnd={stopDrawing}
-              onTouchMove={draw}
-              className="absolute inset-0 w-full h-full cursor-crosshair z-20"
-            />
-          </div>
-
-          <p className="text-[11px] text-zinc-400 mt-3 text-center">
-            Dùng chuột hoặc ngón tay để vẽ các nét Kanji theo đúng thứ tự trên bảng.
-          </p>
-        </div>
+        {/* Practice */}
+        <PracticePad key={currentKanji.id} kanji={currentKanji} />
       </div>
     </div>
+  );
+};
+
+type Point = { x: number; y: number; w: number };
+
+/** Free-hand practice canvas. Strokes are stored in 0–1 coordinates so they survive resizes. */
+const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const strokesRef = useRef<Point[][]>([]);
+  const activeRef = useRef<Point[] | null>(null);
+  const frameRef = useRef(0);
+  const [strokeCount, setStrokeCount] = useState(0);
+  const [showGuide, setShowGuide] = useState(true);
+
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const size = canvas.width;
+    ctx.clearRect(0, 0, size, size);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#ede7dd';
+    const all = activeRef.current ? [...strokesRef.current, activeRef.current] : strokesRef.current;
+    const base = size * 0.034;
+    for (const pts of all) {
+      if (pts.length === 1) {
+        ctx.fillStyle = '#ede7dd';
+        ctx.beginPath();
+        ctx.arc(pts[0].x * size, pts[0].y * size, (base * pts[0].w) / 2, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
+      // Quadratic segments through midpoints give a smooth line; width follows pen pressure
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1];
+        const p1 = pts[i];
+        const prevMid = i === 1 ? p0 : { x: (pts[i - 2].x + p0.x) / 2, y: (pts[i - 2].y + p0.y) / 2 };
+        const mid = i === pts.length - 1 ? p1 : { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+        ctx.lineWidth = base * ((p0.w + p1.w) / 2);
+        ctx.beginPath();
+        ctx.moveTo(prevMid.x * size, prevMid.y * size);
+        ctx.quadraticCurveTo(p0.x * size, p0.y * size, mid.x * size, mid.y * size);
+        ctx.stroke();
+      }
+    }
+  }, []);
+
+  const scheduleRedraw = useCallback(() => {
+    if (frameRef.current) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = 0;
+      redraw();
+    });
+  }, [redraw]);
+
+  // Match the backing store to the displayed size and pixel ratio so ink stays crisp
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const resize = () => {
+      const px = Math.round(canvas.getBoundingClientRect().width * (window.devicePixelRatio || 1));
+      if (px > 0 && canvas.width !== px) {
+        canvas.width = px;
+        canvas.height = px;
+        redraw();
+      }
+    };
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frameRef.current);
+    };
+  }, [redraw]);
+
+  const toPoint = (e: React.PointerEvent<HTMLCanvasElement>): Point => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pressure = e.pointerType === 'pen' ? 0.45 + e.pressure * 0.9 : 1;
+    return { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height, w: pressure };
+  };
+
+  const finishStroke = () => {
+    if (!activeRef.current) return;
+    strokesRef.current = [...strokesRef.current, activeRef.current];
+    activeRef.current = null;
+    setStrokeCount(strokesRef.current.length);
+    scheduleRedraw();
+  };
+
+  const handleUndo = () => {
+    strokesRef.current = strokesRef.current.slice(0, -1);
+    setStrokeCount(strokesRef.current.length);
+    redraw();
+  };
+
+  const handleClear = () => {
+    strokesRef.current = [];
+    activeRef.current = null;
+    setStrokeCount(0);
+    redraw();
+  };
+
+  const countTone = strokeCount === 0 ? 'text-paper-3' : strokeCount === kanji.st ? 'text-ok' : strokeCount > kanji.st ? 'text-bad' : 'text-paper-2';
+
+  return (
+    <section className="rounded-2xl bg-ink-900 border border-line p-5 flex flex-col" aria-label="Bảng luyện viết">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div>
+          <h2 className="text-sm font-semibold text-paper">Tự viết theo mẫu</h2>
+          <p className={`text-xs tabular-nums mt-0.5 ${countTone}`} aria-live="polite">
+            Đã viết {strokeCount}/{kanji.st} nét
+            {strokeCount > kanji.st ? ' · nhiều hơn số nét chuẩn' : strokeCount === kanji.st ? ' · đủ số nét' : ''}
+          </p>
+        </div>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => setShowGuide((v) => !v)}
+            aria-pressed={showGuide}
+            aria-label={showGuide ? 'Ẩn chữ mẫu' : 'Hiện chữ mẫu'}
+            title={showGuide ? 'Ẩn chữ mẫu' : 'Hiện chữ mẫu'}
+            className={iconButton}
+          >
+            {showGuide ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+          </button>
+          <button type="button" onClick={handleUndo} disabled={strokeCount === 0} aria-label="Hoàn tác nét vừa viết" title="Hoàn tác" className={iconButton}>
+            <Undo2 className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={strokeCount === 0}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-sm font-medium text-paper-2 hover:text-paper hover:bg-ink-850 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+          >
+            <Eraser className="w-4 h-4" aria-hidden="true" />
+            Xóa
+          </button>
+        </div>
+      </div>
+
+      <div className="relative w-full max-w-[26rem] mx-auto aspect-square rounded-xl bg-ink-950 border border-line overflow-hidden select-none">
+        <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">
+          <g className="stroke-ink-700" strokeWidth="0.35" fill="none">
+            <line x1="50" y1="0" x2="50" y2="100" strokeDasharray="1.5 1.5" />
+            <line x1="0" y1="50" x2="100" y2="50" strokeDasharray="1.5 1.5" />
+            <line x1="0" y1="0" x2="100" y2="100" strokeDasharray="0.7 2.2" opacity="0.6" />
+            <line x1="100" y1="0" x2="0" y2="100" strokeDasharray="0.7 2.2" opacity="0.6" />
+          </g>
+          {showGuide && (
+            <text x="50" y="52" textAnchor="middle" dominantBaseline="central" fontSize="82" lang="ja" className="font-kanji fill-ink-800">
+              {kanji.c}
+            </text>
+          )}
+        </svg>
+
+        <canvas
+          ref={canvasRef}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            activeRef.current = [toPoint(e)];
+            scheduleRedraw();
+          }}
+          onPointerMove={(e) => {
+            if (!activeRef.current) return;
+            activeRef.current.push(toPoint(e));
+            scheduleRedraw();
+          }}
+          onPointerUp={finishStroke}
+          onPointerCancel={finishStroke}
+          className="absolute inset-0 w-full h-full cursor-crosshair touch-none"
+          aria-label={`Bảng tập viết chữ ${kanji.c}`}
+        />
+      </div>
+
+      <p className="text-xs text-paper-3 mt-3 text-center">Viết bằng chuột, ngón tay hoặc bút cảm ứng, theo đúng thứ tự nét của khung mẫu.</p>
+    </section>
   );
 };

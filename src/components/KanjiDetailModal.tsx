@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
-import { X, Volume2, Bookmark, BookmarkCheck, CheckCircle2, Copy, Check, ChevronLeft, ChevronRight } from 'lucide-react';
-import type { KanjiItem, JLPTLevel } from '../types/kanji';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Volume2, Bookmark, CheckCircle2, Copy, Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import type { KanjiItem } from '../types/kanji';
 import { StrokePlayer } from './StrokePlayer';
 import { speakJapanese } from '../utils/speech';
+import { LEVEL_STYLES, levelLabelClass } from '../utils/levels';
 
 interface KanjiDetailModalProps {
   kanji: KanjiItem | null;
@@ -15,13 +16,10 @@ interface KanjiDetailModalProps {
   onToggleMaster: (id: string) => void;
 }
 
-const LEVEL_COLORS: Record<JLPTLevel, { badge: string }> = {
-  N5: { badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
-  N4: { badge: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' },
-  N3: { badge: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
-  N2: { badge: 'bg-purple-500/15 text-purple-400 border-purple-500/30' },
-  N1: { badge: 'bg-rose-500/15 text-rose-400 border-rose-500/30' },
-};
+const headerButton =
+  'grid place-items-center w-9 h-9 rounded-lg text-paper-2 hover:text-paper hover:bg-ink-800 transition-colors cursor-pointer';
+const readingChip =
+  'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-line bg-ink-950 text-sm text-paper hover:border-line-strong transition-colors cursor-pointer';
 
 export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
   kanji,
@@ -33,13 +31,47 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
   onToggleStar,
   onToggleMaster,
 }) => {
-  const [copied, setCopied] = React.useState(false);
+  const [copied, setCopied] = useState(false);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+
+  // Focus into the dialog, lock page scroll, and hand focus back on close
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const { overflow } = document.body.style;
+    document.body.style.overflow = 'hidden';
+    closeRef.current?.focus();
+    return () => {
+      document.body.style.overflow = overflow;
+      previous?.focus?.();
+    };
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      // The stroke timeline uses the arrow keys itself
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.key === 'ArrowLeft' && onPrev) onPrev();
       if (e.key === 'ArrowRight' && onNext) onNext();
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -47,268 +79,206 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
 
   if (!kanji) return null;
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(kanji.c);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(kanji.c);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* Clipboard blocked (insecure context or denied): the glyph stays selectable */
+    }
   };
 
-  const levelStyle = LEVEL_COLORS[kanji.lvl] || LEVEL_COLORS.N5;
+  const hv = kanji.hv.join(' · ');
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 grid place-items-center p-3 sm:p-6 bg-black/75 animate-overlay"
       onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="kanji-detail-title"
     >
       <div
-        className="relative w-full max-w-2xl bg-[#0f121b] border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Chi tiết chữ ${kanji.c}, ${hv}`}
         onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-3xl max-h-[92vh] flex flex-col bg-ink-900 border border-line rounded-2xl shadow-[0_24px_64px_-20px_rgb(0_0_0/0.8)] overflow-hidden animate-dialog"
       >
-        {/* Top Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/[0.08] bg-[#0c0e16]/90">
-          <div className="flex items-center gap-3">
-            <span
-              className={`text-xs font-mono font-semibold px-2.5 py-0.5 rounded-full border ${levelStyle.badge} select-none`}
-            >
+        {/* Toolbar */}
+        <div className="flex items-center justify-between gap-3 pl-5 pr-3 h-14 border-b border-line shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className={levelLabelClass(kanji.lvl)}>
+              <span className={`w-1.5 h-1.5 rounded-full ${LEVEL_STYLES[kanji.lvl].dot}`} aria-hidden="true" />
               {kanji.lvl}
             </span>
-            <span className="text-xs text-zinc-400 font-mono">
-              Unicode: U+{kanji.code.toUpperCase()}
-            </span>
+            <span className="font-mono text-[11px] text-paper-3 hidden sm:inline">U+{kanji.code.toUpperCase()}</span>
           </div>
 
-          <div className="flex items-center gap-2">
-            {onPrev && (
-              <button
-                onClick={onPrev}
-                aria-label="Chữ Hán trước"
-                title="Chữ trước (Phím mũi tên Trái)"
-                className="p-1.5 text-zinc-400 hover:text-white bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg border border-white/[0.08] transition cursor-pointer"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-            )}
-            {onNext && (
-              <button
-                onClick={onNext}
-                aria-label="Chữ Hán tiếp theo"
-                title="Chữ tiếp theo (Phím mũi tên Phải)"
-                className="p-1.5 text-zinc-400 hover:text-white bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg border border-white/[0.08] transition cursor-pointer"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            )}
-
+          <div className="flex items-center gap-0.5">
             <button
-              onClick={() => onToggleStar(kanji.id)}
-              aria-label={isStarred ? 'Bỏ lưu' : 'Lưu chữ Kanji này'}
-              className={`p-1.5 rounded-lg border transition cursor-pointer ${
-                isStarred
-                  ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
-                  : 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:text-white'
-              }`}
-              title={isStarred ? 'Bỏ lưu' : 'Lưu Kanji này'}
+              type="button"
+              onClick={onPrev}
+              disabled={!onPrev}
+              aria-label="Chữ trước"
+              title="Chữ trước (←)"
+              className={`${headerButton} disabled:opacity-30 disabled:pointer-events-none`}
             >
-              {isStarred ? (
-                <BookmarkCheck className="w-4 h-4 fill-amber-400/20" />
-              ) : (
-                <Bookmark className="w-4 h-4" />
-              )}
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onNext}
+              disabled={!onNext}
+              aria-label="Chữ tiếp theo"
+              title="Chữ tiếp theo (→)"
+              className={`${headerButton} disabled:opacity-30 disabled:pointer-events-none`}
+            >
+              <ChevronRight className="w-4 h-4" />
             </button>
 
+            <span className="w-px h-5 bg-line mx-1.5" aria-hidden="true" />
+
             <button
+              type="button"
+              onClick={() => onToggleStar(kanji.id)}
+              aria-pressed={isStarred}
+              aria-label={isStarred ? 'Bỏ lưu chữ này' : 'Lưu chữ này'}
+              title={isStarred ? 'Bỏ lưu' : 'Lưu chữ này'}
+              className={`${headerButton} ${isStarred ? 'text-kin hover:text-kin' : ''}`}
+            >
+              <Bookmark className={`w-4 h-4 ${isStarred ? 'fill-current' : ''}`} />
+            </button>
+            <button
+              type="button"
               onClick={() => onToggleMaster(kanji.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition cursor-pointer ${
-                isMastered
-                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                  : 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:text-white'
+              aria-pressed={isMastered}
+              aria-label={isMastered ? 'Đã thuộc' : 'Đánh dấu đã thuộc'}
+              title={isMastered ? 'Bỏ đánh dấu đã thuộc' : 'Đánh dấu đã thuộc'}
+              className={`inline-flex items-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-lg text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                isMastered ? 'bg-ok/12 text-ok' : 'text-paper-2 hover:text-paper hover:bg-ink-800'
               }`}
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>{isMastered ? 'Đã thuộc' : 'Thuộc'}</span>
+              <span className="hidden sm:inline">{isMastered ? 'Đã thuộc' : 'Đánh dấu thuộc'}</span>
             </button>
 
-            <button
-              onClick={onClose}
-              aria-label="Đóng cửa sổ chi tiết (Esc)"
-              className="p-1.5 text-zinc-400 hover:text-white bg-zinc-800/80 hover:bg-zinc-700/80 rounded-lg border border-white/[0.08] transition ml-1 cursor-pointer"
-            >
+            <button ref={closeRef} type="button" onClick={onClose} aria-label="Đóng (Esc)" title="Đóng (Esc)" className={`${headerButton} ml-1`}>
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Modal Body */}
-        <div className="p-5 sm:p-6 overflow-y-auto space-y-5">
-          {/* Main Hero: Character & Stroke Animation */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center bg-[#0a0c12]/80 p-5 rounded-2xl border border-white/[0.08]">
-            {/* Left: Big Kanji & Pronunciation */}
-            <div className="flex flex-col items-center justify-center text-center">
-              <div className="relative group">
-                <span
-                  id="kanji-detail-title"
-                  className="text-8xl font-kanji text-zinc-100 select-none block leading-tight drop-shadow-sm"
-                >
+        <div className="overflow-y-auto overscroll-contain">
+          {/* Identity + stroke order */}
+          <section className="grid md:grid-cols-[minmax(0,1fr)_auto] gap-x-8 gap-y-6 p-5 sm:p-6">
+            <div className="min-w-0 flex flex-col">
+              <div className="flex items-end gap-4">
+                <span lang="ja" className="font-kanji text-[7.5rem] leading-[0.95] text-paper select-all">
                   {kanji.c}
                 </span>
-                <button
-                  onClick={handleCopy}
-                  aria-label="Sao chép chữ Hán vào bộ nhớ tạm"
-                  title="Sao chép chữ Hán"
-                  className="absolute -top-1 -right-4 p-1.5 bg-zinc-800/90 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition cursor-pointer border border-white/[0.08]"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
+                <div className="flex flex-col gap-1 pb-2">
+                  <button
+                    type="button"
+                    onClick={() => speakJapanese(kanji.c)}
+                    aria-label={`Phát âm chữ ${kanji.c}`}
+                    title="Nghe phát âm"
+                    className={headerButton}
+                  >
+                    <Volume2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    aria-label={copied ? 'Đã sao chép' : 'Sao chép chữ Hán'}
+                    title={copied ? 'Đã sao chép' : 'Sao chép chữ Hán'}
+                    className={headerButton}
+                  >
+                    {copied ? <Check className="w-4 h-4 text-ok" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
-              <div className="mt-3 flex items-center gap-2">
-                <span className="text-2xl font-bold text-amber-400 tracking-wider">
-                  {kanji.hv.join(' • ')}
-                </span>
-                <button
-                  onClick={() => speakJapanese(kanji.c)}
-                  aria-label={`Phát âm chữ ${kanji.c}`}
-                  className="p-1.5 text-zinc-400 hover:text-blue-400 bg-zinc-800/80 hover:bg-zinc-700 rounded-lg transition cursor-pointer border border-white/[0.06]"
-                  title="Nghe phát âm"
-                >
-                  <Volume2 className="w-4 h-4" />
-                </button>
-              </div>
+              <h2 className="mt-4 text-3xl font-bold text-kin tracking-wide">{hv}</h2>
+              <p className="mt-1 text-sm text-paper-3">
+                {kanji.st} nét · Bộ {kanji.rad_vi || <span lang="ja">{kanji.rad}</span>}
+              </p>
 
-              <div className="text-xs text-zinc-400 mt-1 font-mono">
-                {kanji.st} nét • Bộ {kanji.rad_vi || kanji.rad}
-              </div>
-            </div>
-
-            {/* Right: Official Stroke Order Animation (KanjiVG) */}
-            <div>
-              <StrokePlayer code={kanji.code} character={kanji.c} totalStrokes={kanji.st} />
-            </div>
-          </div>
-
-          {/* Section: Meaning in Vietnamese & English */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-mono uppercase tracking-wider text-zinc-400">
-              Ý nghĩa tiếng Việt
-            </h3>
-            <div className="bg-[#0a0c12]/60 p-4 rounded-xl border border-white/[0.08]">
-              <ul className="space-y-1.5">
+              <ul className="mt-5 flex flex-col gap-1.5 text-[15px] text-paper list-disc pl-5 marker:text-shu">
                 {kanji.m_vi.map((m, idx) => (
-                  <li key={idx} className="text-sm text-zinc-200 flex items-start gap-2">
-                    <span className="text-emerald-400 font-bold">•</span>
-                    <span>{m}</span>
-                  </li>
+                  <li key={idx}>{m}</li>
                 ))}
               </ul>
-              {kanji.m_en && kanji.m_en.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-white/[0.06] text-xs text-zinc-400">
-                  <span className="font-mono text-zinc-500 mr-2">English:</span>
-                  {kanji.m_en.join(', ')}
-                </div>
+              {kanji.m_en.length > 0 && (
+                <p className="mt-3 text-sm text-paper-3">
+                  <span lang="en">{kanji.m_en.join(', ')}</span>
+                </p>
               )}
             </div>
-          </div>
 
-          {/* Section: Readings (On / Kun) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-[#0a0c12]/60 p-4 rounded-xl border border-white/[0.08]">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">
-                  Âm On (Onyomi - Katakana)
-                </span>
-                {kanji.on.length > 0 && (
-                  <button
-                    onClick={() => speakJapanese(kanji.on[0])}
-                    aria-label={`Nghe âm On ${kanji.on[0]}`}
-                    className="text-zinc-400 hover:text-blue-400 transition cursor-pointer"
-                    title="Nghe âm On"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {kanji.on.length > 0 ? (
-                  kanji.on.map((reading, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => speakJapanese(reading)}
-                      className="px-2.5 py-1 text-sm font-kanji bg-zinc-900/90 border border-white/[0.08] text-zinc-200 rounded-lg cursor-pointer hover:border-blue-500/50 hover:text-blue-300 transition"
-                      title="Nhấn để nghe"
-                    >
-                      {reading}
-                    </button>
-                  ))
-                ) : (
-                  <span className="text-xs text-zinc-500 italic">Không có âm On thông dụng</span>
-                )}
-              </div>
+            <div className="md:w-[16.5rem]">
+              <StrokePlayer code={kanji.code} character={kanji.c} totalStrokes={kanji.st} />
             </div>
+          </section>
 
-            <div className="bg-[#0a0c12]/60 p-4 rounded-xl border border-white/[0.08]">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">
-                  Âm Kun (Kunyomi - Hiragana)
-                </span>
-                {kanji.kun.length > 0 && (
-                  <button
-                    onClick={() => speakJapanese(kanji.kun[0])}
-                    aria-label={`Nghe âm Kun ${kanji.kun[0]}`}
-                    className="text-zinc-400 hover:text-blue-400 transition cursor-pointer"
-                    title="Nghe âm Kun"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {kanji.kun.length > 0 ? (
-                  kanji.kun.map((reading, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => speakJapanese(reading)}
-                      className="px-2.5 py-1 text-sm font-kanji bg-zinc-900/90 border border-white/[0.08] text-zinc-200 rounded-lg cursor-pointer hover:border-blue-500/50 hover:text-blue-300 transition"
-                      title="Nhấn để nghe"
-                    >
-                      {reading}
-                    </button>
-                  ))
-                ) : (
-                  <span className="text-xs text-zinc-500 italic">Không có âm Kun thông dụng</span>
-                )}
-              </div>
-            </div>
-          </div>
+          {/* Readings */}
+          <section className="grid sm:grid-cols-2 gap-6 px-5 sm:px-6 py-5 border-t border-line">
+            <ReadingGroup title="Âm On" hint="Katakana" readings={kanji.on} emptyText="Không có âm On thông dụng" />
+            <ReadingGroup title="Âm Kun" hint="Hiragana" readings={kanji.kun} emptyText="Không có âm Kun thông dụng" />
+          </section>
 
-          {/* Section: Example Words (Jukugo) */}
-          {kanji.words && kanji.words.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-xs font-mono uppercase tracking-wider text-zinc-400">
-                Từ ghép ví dụ (Jukugo)
-              </h3>
+          {kanji.words.length > 0 && (
+            <section className="px-5 sm:px-6 py-5 border-t border-line">
+              <h3 className="text-sm font-semibold text-paper-2 mb-2.5">Từ ghép ví dụ</h3>
               <div className="flex flex-wrap gap-2">
                 {kanji.words.map((word, idx) => (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => speakJapanese(word)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0a0c12]/80 hover:bg-zinc-800 border border-white/[0.08] hover:border-white/[0.18] rounded-lg text-xs font-kanji text-zinc-300 transition cursor-pointer active:scale-[0.98]"
-                    title="Nhấn để phát âm từ ghép"
+                    title="Nghe phát âm"
+                    className={readingChip}
                   >
-                    <span>{word}</span>
-                    <Volume2 className="w-3 h-3 text-zinc-500" />
+                    <span lang="ja" className="font-jp">{word}</span>
+                    <Volume2 className="w-3.5 h-3.5 text-paper-3" aria-hidden="true" />
                   </button>
                 ))}
               </div>
-            </div>
+            </section>
           )}
         </div>
       </div>
     </div>
   );
 };
+
+const ReadingGroup: React.FC<{ title: string; hint: string; readings: string[]; emptyText: string }> = ({
+  title,
+  hint,
+  readings,
+  emptyText,
+}) => (
+  <div>
+    <h3 className="text-sm font-semibold text-paper-2 mb-2.5">
+      {title} <span className="font-normal text-paper-3">· {hint}</span>
+    </h3>
+    {readings.length > 0 ? (
+      <div className="flex flex-wrap gap-2">
+        {readings.map((reading, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => speakJapanese(reading)}
+            aria-label={`Nghe ${reading}`}
+            title="Nghe phát âm"
+            className={readingChip}
+          >
+            <span lang="ja" className="font-jp">{reading}</span>
+            <Volume2 className="w-3.5 h-3.5 text-paper-3" aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+    ) : (
+      <p className="text-sm text-paper-3">{emptyText}</p>
+    )}
+  </div>
+);

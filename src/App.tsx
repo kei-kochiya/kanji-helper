@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useRef, useTransition } from 'react';
-import { Search, X, ArrowUpDown, Bookmark, CheckCircle2, RefreshCw, AlertCircle } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef, useDeferredValue, useCallback } from 'react';
+import { Search, X, Bookmark, CheckCircle2, SearchX, Shuffle } from 'lucide-react';
 import kanjiRawData from './data/kanji_data.json';
 import type { KanjiItem, JLPTLevel, ViewMode, UserProgress } from './types/kanji';
 import { Header } from './components/Header';
@@ -10,67 +10,80 @@ import { FlashcardMode } from './components/FlashcardMode';
 import { QuizMode } from './components/QuizMode';
 import { StrokeOrderPad } from './components/StrokeOrderPad';
 import { loadUserProgress, saveUserProgress, exportProgressJSON, importProgressJSON } from './utils/storage';
+import { ALL_LEVELS } from './utils/levels';
+import { buildSearchIndex, foldText } from './utils/search';
+import { shuffled } from './utils/random';
 
 const KANJI_DATA: KanjiItem[] = kanjiRawData as KanjiItem[];
+const SEARCH_INDEX = buildSearchIndex(KANJI_DATA);
 const ITEMS_PER_PAGE = 96;
 
 type SortOption = 'default' | 'strokes_asc' | 'strokes_desc' | 'random';
 type StatusFilter = 'all' | 'starred' | 'unmastered' | 'mastered';
+type Toast = { id: number; message: string; tone: 'ok' | 'bad' };
+
+const makeRandomRank = () => new Map(shuffled(KANJI_DATA.map((k) => k.id)).map((id, i) => [id, i]));
+
+const isTypingTarget = (el: EventTarget | null) =>
+  el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
 
 export function App() {
-  // Mode State
   const [currentMode, setCurrentMode] = useState<ViewMode>('grid');
 
-  // Filter & Search State
-  const [selectedLevels, setSelectedLevels] = useState<Set<JLPTLevel>>(
-    () => new Set<JLPTLevel>(['N5', 'N4', 'N3', 'N2', 'N1'])
-  );
+  // Filters
+  const [selectedLevels, setSelectedLevels] = useState<Set<JLPTLevel>>(() => new Set(ALL_LEVELS));
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredQuery = useDeferredValue(searchQuery);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortBy, setSortBy] = useState<SortOption>('default');
+  const [randomRank, setRandomRank] = useState<Map<string, number> | null>(null);
   const [displayLimit, setDisplayLimit] = useState(ITEMS_PER_PAGE);
 
-  // User Progress (LocalStorage)
   const [progress, setProgress] = useState<UserProgress>(() => loadUserProgress());
-
-  // Modal State
   const [activeKanji, setActiveKanji] = useState<KanjiItem | null>(null);
   const [padIndex, setPadIndex] = useState(0);
+  const [toast, setToast] = useState<Toast | null>(null);
 
-  // References
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [, startTransition] = useTransition();
 
-  // Save progress on changes
   useEffect(() => {
     saveUserProgress(progress);
   }, [progress]);
 
-  // Keyboard shortcut '/' to search
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(id);
+  }, [toast]);
+
+  const showToast = useCallback((message: string, tone: Toast['tone'] = 'ok') => {
+    setToast({ id: Date.now(), message, tone });
+  }, []);
+
+  // "/" focuses search from anywhere except while typing or inside the dialog
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '/' && (e.target as HTMLElement).tagName !== 'INPUT') {
+      if (e.key === '/' && !isTypingTarget(e.target) && !activeKanji) {
         e.preventDefault();
         searchInputRef.current?.focus();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [activeKanji]);
 
-  // Level counts for badges
   const levelCounts = useMemo(() => {
     const counts: Record<JLPTLevel, number> = { N5: 0, N4: 0, N3: 0, N2: 0, N1: 0 };
     for (const k of KANJI_DATA) {
-      if (counts[k.lvl] !== undefined) {
-        counts[k.lvl]++;
-      }
+      if (counts[k.lvl] !== undefined) counts[k.lvl]++;
     }
     return counts;
   }, []);
 
-  // Level toggles
+  const starredSet = useMemo(() => new Set(progress.starred), [progress.starred]);
+  const masteredSet = useMemo(() => new Set(progress.mastered), [progress.mastered]);
+
   const handleToggleLevel = (lvl: JLPTLevel) => {
     setSelectedLevels((prev) => {
       const next = new Set(prev);
@@ -85,7 +98,7 @@ export function App() {
   };
 
   const handleSelectAllLevels = () => {
-    setSelectedLevels(new Set<JLPTLevel>(['N5', 'N4', 'N3', 'N2', 'N1']));
+    setSelectedLevels(new Set(ALL_LEVELS));
     setDisplayLimit(ITEMS_PER_PAGE);
   };
 
@@ -94,88 +107,74 @@ export function App() {
     setDisplayLimit(ITEMS_PER_PAGE);
   };
 
-  // Star / Master toggles
+  const handleSortChange = (value: SortOption) => {
+    setSortBy(value);
+    if (value === 'random') setRandomRank(makeRandomRank());
+  };
+
   const handleToggleStar = (id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setProgress((prev) => {
-      const isStarred = prev.starred.includes(id);
-      return {
-        ...prev,
-        starred: isStarred ? prev.starred.filter((k) => k !== id) : [...prev.starred, id],
-      };
-    });
+    e?.stopPropagation();
+    setProgress((prev) => ({
+      ...prev,
+      starred: prev.starred.includes(id) ? prev.starred.filter((k) => k !== id) : [...prev.starred, id],
+    }));
   };
 
   const handleToggleMaster = (id: string) => {
-    setProgress((prev) => {
-      const isMastered = prev.mastered.includes(id);
-      return {
-        ...prev,
-        mastered: isMastered ? prev.mastered.filter((k) => k !== id) : [...prev.mastered, id],
-      };
-    });
+    setProgress((prev) => ({
+      ...prev,
+      mastered: prev.mastered.includes(id) ? prev.mastered.filter((k) => k !== id) : [...prev.mastered, id],
+    }));
   };
 
-  // Filtered & Sorted Kanji List
+  // Progress only feeds the list when a status filter needs it, so marking a card
+  // as mastered under "Tất cả" does not rebuild the list (and reset the flashcard deck)
+  const statusIds =
+    statusFilter === 'starred' ? progress.starred : statusFilter === 'all' ? null : progress.mastered;
+
   const filteredKanji = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = foldText(deferredQuery.trim());
+    const statusSet = statusIds ? new Set(statusIds) : null;
 
-    return KANJI_DATA.filter((k) => {
-      // 1. Level Filter
+    const list = KANJI_DATA.filter((k) => {
       if (!selectedLevels.has(k.lvl)) return false;
-
-      // 2. Status Filter
-      if (statusFilter === 'starred' && !progress.starred.includes(k.id)) return false;
-      if (statusFilter === 'mastered' && !progress.mastered.includes(k.id)) return false;
-      if (statusFilter === 'unmastered' && progress.mastered.includes(k.id)) return false;
-
-      // 3. Search Query
-      if (query) {
-        const matchChar = k.c.toLowerCase().includes(query);
-        const matchHV = k.hv.some((hv) => hv.toLowerCase().includes(query));
-        const matchVi = k.m_vi.some((m) => m.toLowerCase().includes(query));
-        const matchEn = k.m_en.some((m) => m.toLowerCase().includes(query));
-        const matchOn = k.on.some((r) => r.toLowerCase().includes(query));
-        const matchKun = k.kun.some((r) => r.toLowerCase().includes(query));
-        if (!matchChar && !matchHV && !matchVi && !matchEn && !matchOn && !matchKun) {
-          return false;
-        }
+      if (statusSet) {
+        const inSet = statusSet.has(k.id);
+        if (statusFilter === 'unmastered' ? inSet : !inSet) return false;
       }
-
-      return true;
-    }).sort((a, b) => {
-      if (sortBy === 'strokes_asc') return a.st - b.st;
-      if (sortBy === 'strokes_desc') return b.st - a.st;
-      if (sortBy === 'random') return 0.5 - Math.random();
-      return 0; // Default order
+      return !query || (SEARCH_INDEX.get(k.id) ?? '').includes(query);
     });
-  }, [selectedLevels, searchQuery, statusFilter, sortBy, progress.starred, progress.mastered]);
 
-  // Modal Next/Prev navigation within filtered list
-  const activeKanjiIndex = useMemo(() => {
-    if (!activeKanji) return -1;
-    return filteredKanji.findIndex((k) => k.id === activeKanji.id);
-  }, [activeKanji, filteredKanji]);
+    if (sortBy === 'strokes_asc') list.sort((a, b) => a.st - b.st);
+    else if (sortBy === 'strokes_desc') list.sort((a, b) => b.st - a.st);
+    else if (sortBy === 'random' && randomRank) list.sort((a, b) => (randomRank.get(a.id) ?? 0) - (randomRank.get(b.id) ?? 0));
+    return list;
+  }, [selectedLevels, deferredQuery, statusFilter, statusIds, sortBy, randomRank]);
 
-  const handleModalPrev = () => {
-    if (activeKanjiIndex > 0) {
-      setActiveKanji(filteredKanji[activeKanjiIndex - 1]);
-    }
-  };
+  const activeKanjiIndex = useMemo(
+    () => (activeKanji ? filteredKanji.findIndex((k) => k.id === activeKanji.id) : -1),
+    [activeKanji, filteredKanji]
+  );
 
-  const handleModalNext = () => {
-    if (activeKanjiIndex < filteredKanji.length - 1) {
+  const handleModalPrev = useCallback(() => {
+    if (activeKanjiIndex > 0) setActiveKanji(filteredKanji[activeKanjiIndex - 1]);
+  }, [activeKanjiIndex, filteredKanji]);
+
+  const handleModalNext = useCallback(() => {
+    if (activeKanjiIndex >= 0 && activeKanjiIndex < filteredKanji.length - 1) {
       setActiveKanji(filteredKanji[activeKanjiIndex + 1]);
     }
-  };
+  }, [activeKanjiIndex, filteredKanji]);
 
-  // Import / Export
+  const handleCloseModal = useCallback(() => setActiveKanji(null), []);
+
+  // The writing lab keeps its position when the list shrinks, but never points past the end
+  const safePadIndex = Math.min(padIndex, Math.max(0, filteredKanji.length - 1));
+  const padKanji = filteredKanji[safePadIndex];
+
   const handleExport = () => {
     exportProgressJSON(progress);
-  };
-
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
+    showToast('Đã tải tệp sao lưu tiến độ.');
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -184,26 +183,42 @@ export function App() {
     try {
       const imported = await importProgressJSON(file);
       setProgress(imported);
-      alert('Đã khôi phục dữ liệu tiến độ học thành công!');
+      showToast(
+        `Đã khôi phục: ${imported.mastered.length.toLocaleString('vi-VN')} chữ đã thuộc, ${imported.starred.length.toLocaleString('vi-VN')} chữ đã lưu.`
+      );
     } catch {
-      alert('Tệp khôi phục không hợp lệ!');
+      showToast('Tệp không hợp lệ. Hãy chọn tệp .json được xuất từ Kanji Helper.', 'bad');
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  return (
-    <div className="min-h-screen bg-[#090a0f] text-slate-100 flex flex-col font-sans selection:bg-blue-500/30 selection:text-white">
-      {/* Hidden File Input for Import */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".json"
-        onChange={handleFileChange}
-        className="hidden"
-      />
+  const resetFilters = () => {
+    setSearchQuery('');
+    setStatusFilter('all');
+    handleSelectAllLevels();
+  };
 
-      {/* Global Header */}
+  const statusButton = (value: StatusFilter, label: React.ReactNode, activeClass: string) => (
+    <button
+      type="button"
+      onClick={() => {
+        setStatusFilter(value);
+        setDisplayLimit(ITEMS_PER_PAGE);
+      }}
+      aria-pressed={statusFilter === value}
+      className={`inline-flex items-center justify-center gap-1.5 h-8 px-1.5 sm:px-3 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
+        statusFilter === value ? activeClass : 'text-paper-2 hover:text-paper'
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <input ref={fileInputRef} type="file" accept=".json,application/json" onChange={handleFileChange} className="hidden" />
+
       <Header
         currentMode={currentMode}
         onSelectMode={(mode) => {
@@ -214,101 +229,76 @@ export function App() {
         starredCount={progress.starred.length}
         totalKanji={KANJI_DATA.length}
         onExport={handleExport}
-        onImport={handleImportClick}
+        onImport={() => fileInputRef.current?.click()}
       />
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
-        {/* Controls Section (Always visible across all modes for filtering) */}
-        <div className="bg-[#10131d]/90 p-4 sm:p-5 rounded-2xl border border-white/[0.08] mb-6 space-y-4 shadow-sm">
-          {/* Top Row: Search input & Status Filter pills */}
-          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-            {/* Search Input */}
-            <div className="relative flex-1 max-w-lg">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 sm:py-6">
+        {/* Filters apply to every mode */}
+        <section aria-label="Bộ lọc" className="rounded-2xl bg-ink-900 border border-line p-3 sm:p-4 mb-6 flex flex-col gap-3">
+          <div className="flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
+            <div className="relative flex-1 lg:max-w-xl">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-paper-3 pointer-events-none" aria-hidden="true" />
               <input
                 ref={searchInputRef}
                 type="text"
+                inputMode="search"
                 value={searchQuery}
                 onChange={(e) => {
-                  startTransition(() => setSearchQuery(e.target.value));
+                  setSearchQuery(e.target.value);
                   setDisplayLimit(ITEMS_PER_PAGE);
                 }}
-                placeholder="Tìm chữ Kanji, âm Hán Việt (vd: NHẬT, HỌC), nghĩa, On/Kun..."
-                className="w-full bg-[#0a0c12] text-sm text-zinc-100 placeholder:text-zinc-500 pl-10 pr-10 py-2.5 rounded-xl border border-white/[0.08] focus:border-blue-500/60 focus:outline-none transition shadow-inner"
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && searchQuery) {
+                    e.stopPropagation();
+                    setSearchQuery('');
+                  }
+                }}
+                aria-label="Tìm chữ Hán"
+                placeholder="Tìm chữ, Hán Việt, nghĩa, On/Kun… (vd: nhat, học, よむ)"
+                className="w-full h-10 bg-ink-950 text-sm text-paper placeholder:text-paper-3 pl-10 pr-10 rounded-xl border border-line focus:border-shu/60 focus:outline-none transition-colors"
               />
               {searchQuery ? (
                 <button
-                  onClick={() => setSearchQuery('')}
-                  aria-label="Xóa từ khóa tìm kiếm"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200 cursor-pointer p-1"
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label="Xóa từ khóa"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 grid place-items-center w-7 h-7 rounded-md text-paper-3 hover:text-paper cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
               ) : (
-                <span className="hidden sm:inline-block absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-zinc-400 bg-zinc-800/80 px-1.5 py-0.5 rounded border border-white/[0.08] select-none">
+                <kbd className="hidden sm:block absolute right-3 top-1/2 -translate-y-1/2 select-none" aria-hidden="true">
                   /
-                </span>
+                </kbd>
               )}
             </div>
 
-            {/* Quick Status Filters */}
-            <div className="flex items-center gap-1.5 bg-[#0a0c12]/80 p-1 rounded-xl border border-white/[0.08] shrink-0">
-              <button
-                onClick={() => setStatusFilter('all')}
-                aria-pressed={statusFilter === 'all'}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
-                  statusFilter === 'all'
-                    ? 'bg-zinc-800 text-white shadow-sm border border-white/[0.08]'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                Tất cả
-              </button>
-
-              <button
-                onClick={() => setStatusFilter('starred')}
-                aria-pressed={statusFilter === 'starred'}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
-                  statusFilter === 'starred'
-                    ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <Bookmark className="w-3.5 h-3.5 text-amber-400" />
-                <span>Đã lưu ({progress.starred.length})</span>
-              </button>
-
-              <button
-                onClick={() => setStatusFilter('unmastered')}
-                aria-pressed={statusFilter === 'unmastered'}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
-                  statusFilter === 'unmastered'
-                    ? 'bg-zinc-800 text-zinc-200 border border-white/[0.08]'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <span>Chưa thuộc</span>
-              </button>
-
-              <button
-                onClick={() => setStatusFilter('mastered')}
-                aria-pressed={statusFilter === 'mastered'}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
-                  statusFilter === 'mastered'
-                    ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Đã thuộc</span>
-              </button>
+            <div className="grid grid-cols-4 sm:flex items-center gap-0.5 p-1 rounded-lg bg-ink-950 border border-line sm:self-start lg:self-auto">
+              {statusButton('all', 'Tất cả', 'bg-ink-800 text-paper')}
+              {statusButton(
+                'starred',
+                <>
+                  <Bookmark className="w-3.5 h-3.5 hidden sm:block" aria-hidden="true" />
+                  Đã lưu <span className="tabular-nums opacity-80">{progress.starred.length}</span>
+                </>,
+                'bg-kin/12 text-kin'
+              )}
+              {statusButton('unmastered', 'Chưa thuộc', 'bg-ink-800 text-paper')}
+              {statusButton(
+                'mastered',
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 hidden sm:block" aria-hidden="true" />
+                  Đã thuộc <span className="tabular-nums opacity-80">{progress.mastered.length}</span>
+                </>,
+                'bg-ok/12 text-ok'
+              )}
             </div>
           </div>
 
-          {/* Bottom Row: Multi-Level Filters & Sorting */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t border-white/[0.06]">
-            {/* Multi-Level Selector */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t border-line">
             <LevelFilter
               selectedLevels={selectedLevels}
               onToggleLevel={handleToggleLevel}
@@ -317,81 +307,90 @@ export function App() {
               levelCounts={levelCounts}
             />
 
-            {/* Sort Dropdown */}
-            <div className="flex items-center gap-2 self-end md:self-auto">
-              <span className="text-xs font-mono text-zinc-400 flex items-center gap-1 select-none">
-                <ArrowUpDown className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Sắp xếp:</span>
-              </span>
+            <div className="flex items-center gap-2 self-start md:self-auto">
+              <label htmlFor="sort-select" className="text-xs text-paper-3">
+                Sắp xếp
+              </label>
               <select
+                id="sort-select"
                 value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortOption)}
-                aria-label="Tùy chọn sắp xếp chữ Hán"
-                className="bg-[#0a0c12] text-xs text-zinc-300 py-1.5 px-2.5 rounded-lg border border-white/[0.08] focus:outline-none focus:border-zinc-500 font-medium cursor-pointer"
+                onChange={(e) => handleSortChange(e.target.value as SortOption)}
+                className="h-8 bg-ink-950 text-xs text-paper pl-2.5 pr-7 rounded-lg border border-line focus:border-shu/60 focus:outline-none cursor-pointer"
               >
                 <option value="default">Mặc định (N5 → N1)</option>
-                <option value="strokes_asc">Số nét (Tăng dần)</option>
-                <option value="strokes_desc">Số nét (Giảm dần)</option>
-                <option value="random">Ngẫu nhiên (Trộn)</option>
+                <option value="strokes_asc">Số nét tăng dần</option>
+                <option value="strokes_desc">Số nét giảm dần</option>
+                <option value="random">Ngẫu nhiên</option>
               </select>
+              {sortBy === 'random' && (
+                <button
+                  type="button"
+                  onClick={() => setRandomRank(makeRandomRank())}
+                  aria-label="Trộn lại thứ tự"
+                  title="Trộn lại"
+                  className="grid place-items-center w-8 h-8 rounded-lg text-paper-2 hover:text-paper hover:bg-ink-850 transition-colors cursor-pointer"
+                >
+                  <Shuffle className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* View Mode Switching */}
         {currentMode === 'grid' && (
           <div>
-            {/* Result Header Count */}
-            <div className="flex items-center justify-between mb-4 px-1 text-xs text-zinc-400">
-              <span className="font-mono">
-                Hiển thị <strong className="text-zinc-100">{Math.min(filteredKanji.length, displayLimit)}</strong> /{' '}
-                <strong className="text-zinc-100">{filteredKanji.length}</strong> chữ Hán
-              </span>
-
+            <div className="flex items-center justify-between mb-3 px-1 text-xs text-paper-3">
+              <p className="tabular-nums">
+                Hiển thị <span className="text-paper font-medium">{Math.min(filteredKanji.length, displayLimit).toLocaleString('vi-VN')}</span> /{' '}
+                <span className="text-paper font-medium">{filteredKanji.length.toLocaleString('vi-VN')}</span> chữ
+              </p>
               {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  <span>Xóa tìm kiếm</span>
+                <button type="button" onClick={() => setSearchQuery('')} className="text-shu hover:underline underline-offset-2 cursor-pointer">
+                  Xóa tìm kiếm
                 </button>
               )}
             </div>
 
-            {/* Empty State */}
             {filteredKanji.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24 text-center bg-[#10131d]/50 rounded-2xl border border-white/[0.08]">
-                <AlertCircle className="w-10 h-10 text-zinc-500 mb-3" />
-                <h3 className="text-base font-semibold text-zinc-200">Không tìm thấy chữ Kanji nào</h3>
-                <p className="text-xs text-zinc-400 max-w-md mt-1 font-normal">
-                  Vui lòng thử từ khóa khác hoặc bật thêm cấp độ N5–N1 trong thanh bộ lọc bên trên.
+              <div className="flex flex-col items-center justify-center py-20 px-6 text-center rounded-2xl border border-dashed border-line-strong">
+                <SearchX className="w-8 h-8 text-paper-3 mb-3" aria-hidden="true" />
+                <h2 className="text-base font-semibold text-paper">Không tìm thấy chữ nào</h2>
+                <p className="text-sm text-paper-2 max-w-md mt-1.5">
+                  {searchQuery
+                    ? `Không có chữ nào khớp “${searchQuery}” trong các cấp độ và trạng thái đang chọn. Có thể gõ không dấu, ví dụ “hoc”.`
+                    : 'Bộ lọc hiện tại không còn chữ nào. Hãy bật thêm cấp độ hoặc chọn trạng thái khác.'}
                 </p>
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="mt-5 h-9 px-4 rounded-lg bg-ink-800 hover:bg-ink-700 text-sm font-medium text-paper transition-colors cursor-pointer"
+                >
+                  Bỏ toàn bộ bộ lọc
+                </button>
               </div>
             ) : (
               <>
-                {/* Kanji Grid Cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-3">
                   {filteredKanji.slice(0, displayLimit).map((kanji) => (
                     <KanjiCard
                       key={kanji.id}
                       kanji={kanji}
-                      isStarred={progress.starred.includes(kanji.id)}
-                      isMastered={progress.mastered.includes(kanji.id)}
-                      onSelect={(k) => setActiveKanji(k)}
+                      isStarred={starredSet.has(kanji.id)}
+                      isMastered={masteredSet.has(kanji.id)}
+                      onSelect={setActiveKanji}
                       onToggleStar={handleToggleStar}
                     />
                   ))}
                 </div>
 
-                {/* Load More Button */}
                 {displayLimit < filteredKanji.length && (
                   <div className="flex justify-center mt-8">
                     <button
+                      type="button"
                       onClick={() => setDisplayLimit((prev) => prev + ITEMS_PER_PAGE)}
-                      className="px-6 py-2.5 bg-[#121520] hover:bg-[#181c2b] text-xs font-mono text-zinc-300 hover:text-white rounded-xl border border-white/[0.08] hover:border-white/[0.18] transition cursor-pointer active:scale-[0.98] shadow-sm"
+                      className="h-10 px-5 rounded-xl bg-ink-850 hover:bg-ink-800 border border-line text-sm font-medium text-paper transition-colors cursor-pointer"
                     >
-                      Tải thêm {Math.min(ITEMS_PER_PAGE, filteredKanji.length - displayLimit)} chữ tiếp theo
+                      Tải thêm {Math.min(ITEMS_PER_PAGE, filteredKanji.length - displayLimit)} chữ
                     </button>
                   </div>
                 )}
@@ -403,8 +402,8 @@ export function App() {
         {currentMode === 'flashcard' && (
           <FlashcardMode
             kanjiList={filteredKanji}
-            isStarred={(id) => progress.starred.includes(id)}
-            isMastered={(id) => progress.mastered.includes(id)}
+            isStarred={(id) => starredSet.has(id)}
+            isMastered={(id) => masteredSet.has(id)}
             onToggleStar={handleToggleStar}
             onToggleMaster={handleToggleMaster}
           />
@@ -415,48 +414,59 @@ export function App() {
         {currentMode === 'strokes' && (
           <StrokeOrderPad
             kanjiList={filteredKanji}
-            currentIndex={padIndex}
-            onNavigate={(newIdx) => setPadIndex(newIdx)}
-            isStarred={filteredKanji[padIndex] ? progress.starred.includes(filteredKanji[padIndex].id) : false}
-            isMastered={filteredKanji[padIndex] ? progress.mastered.includes(filteredKanji[padIndex].id) : false}
+            currentIndex={safePadIndex}
+            onNavigate={setPadIndex}
+            isStarred={padKanji ? starredSet.has(padKanji.id) : false}
+            isMastered={padKanji ? masteredSet.has(padKanji.id) : false}
             onToggleStar={handleToggleStar}
             onToggleMaster={handleToggleMaster}
           />
         )}
       </main>
 
-      {/* Kanji Detail Modal */}
       {activeKanji && (
         <KanjiDetailModal
           kanji={activeKanji}
-          onClose={() => setActiveKanji(null)}
+          onClose={handleCloseModal}
           onPrev={activeKanjiIndex > 0 ? handleModalPrev : undefined}
-          onNext={activeKanjiIndex < filteredKanji.length - 1 ? handleModalNext : undefined}
-          isStarred={progress.starred.includes(activeKanji.id)}
-          isMastered={progress.mastered.includes(activeKanji.id)}
+          onNext={activeKanjiIndex >= 0 && activeKanjiIndex < filteredKanji.length - 1 ? handleModalNext : undefined}
+          isStarred={starredSet.has(activeKanji.id)}
+          isMastered={masteredSet.has(activeKanji.id)}
           onToggleStar={handleToggleStar}
           onToggleMaster={handleToggleMaster}
         />
       )}
 
-      {/* Footer */}
-      <footer className="mt-auto border-t border-white/[0.08] bg-[#090a0f]/90 py-6 text-center text-xs text-zinc-400 font-mono">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div>
-            Kanji Helper • N5 → N1 ({KANJI_DATA.length.toLocaleString()} Hán tự chuẩn)
+      <div className="fixed inset-x-0 bottom-4 z-[60] flex justify-center px-4 pointer-events-none" aria-live="polite">
+        {toast && (
+          <div
+            key={toast.id}
+            className={`animate-toast pointer-events-auto max-w-md rounded-xl border bg-ink-850 px-4 py-3 text-sm shadow-[0_12px_32px_-12px_rgb(0_0_0/0.8)] ${
+              toast.tone === 'ok' ? 'border-ok/35 text-paper' : 'border-bad/40 text-paper'
+            }`}
+            role={toast.tone === 'bad' ? 'alert' : 'status'}
+          >
+            {toast.message}
           </div>
-          <div className="flex items-center gap-4 text-zinc-400">
-            <span>Dữ liệu: OpenJLPT + KanjiDictVN + KanjiVG</span>
-            <span>•</span>
+        )}
+      </div>
+
+      <footer className="mt-auto border-t border-line py-6 text-xs text-paper-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
+          <p>
+            Kanji Helper · N5 → N1 · {KANJI_DATA.length.toLocaleString('vi-VN')} Hán tự
+          </p>
+          <p>
+            Dữ liệu: OpenJLPT, KanjiDictVN, KanjiVG (CC BY-SA 3.0) ·{' '}
             <a
               href="https://github.com/kei-kochiya/kanji-helper"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-zinc-300 hover:text-white underline transition"
+              className="text-paper-2 hover:text-paper underline underline-offset-2"
             >
               GitHub
             </a>
-          </div>
+          </p>
         </div>
       </footer>
     </div>

@@ -26,13 +26,14 @@
   - **Từ vựng ví dụ (Jukugo)**: Các từ ghép thông dụng nhất chứa Hán tự đó.
 - **Thứ tự nét viết (Stroke Order)**:
   - Tích hợp vector SVG từ **KanjiVG**.
-  - Xem hoạt ảnh từng nét viết, tạm dừng, tua lại, bật/tắt đánh số thứ tự nét.
-  - **Bảng vẽ Canvas**: Cho phép tự tay luyện viết theo ô kẻ mễ (Mizukiri) bằng chuột hoặc màn hình cảm ứng.
+  - Hoạt ảnh viết từng nét như cọ thật: nét được kéo dọc theo đúng hướng viết, nhịp chậm–nhanh–chậm, nghỉ giữa các nét, nét đang viết tô màu son rồi chuyển sang màu mực.
+  - Thanh tiến trình chia theo từng nét (kéo để tua, phím mũi tên để đi từng nét), chỉnh tốc độ 0.5× / 1× / 2×, bật/tắt số thứ tự nét.
+  - **Bảng luyện viết**: Tự viết theo ô chữ mễ (米字格) bằng chuột, ngón tay hoặc bút cảm ứng (nhận lực nhấn), có hoàn tác và đếm số nét so với số nét chuẩn.
 - **Phát âm âm thanh (Audio Text-to-Speech)**:
   - Tích hợp Web Speech API (`ja-JP`) để nghe phát âm Kanji, âm On/Kun và từ ghép mẫu.
 - **4 Chế độ học tập chuyên biệt**:
-  1. **Thư viện (Explorer)**: Lưới tra cứu tốc độ 0ms, tìm kiếm đa năng (theo Kanji, Hán Việt, Romaji, Kana, nghĩa).
-  2. **Thẻ nhớ Flashcard (SRS)**: Học lật mặt thẻ 3D, hỗ trợ phím tắt Space/Mũi tên, đánh dấu thuộc / chưa thuộc.
+  1. **Thư viện (Explorer)**: Lưới tra cứu tốc độ 0ms, tìm kiếm đa năng (theo Kanji, Hán Việt, Kana, nghĩa Việt/Anh), gõ không dấu vẫn tìm được (`nhat` → NHẬT).
+  2. **Thẻ nhớ (Flashcard)**: Học lật mặt thẻ 3D, hỗ trợ phím tắt Space/Mũi tên, đánh dấu thuộc / chưa thuộc.
   3. **Trắc nghiệm nâng cao (Quiz)**:
      - Tùy chọn nhiều dạng câu hỏi phong phú (chọn ít nhất 1 dạng, nhiều nhất tất cả):
        - *Kanji → Hán Việt & Nghĩa*
@@ -43,13 +44,14 @@
        - *Kanji → Onyomi* (ví dụ: `学` → `ガク`)
      - Cài đặt giới hạn số câu hỏi (5, 10, 15, 20, 30, 50 câu).
      - Cho phép dừng sớm / thoát bất cứ lúc nào và hiển thị tổng kết bài làm chi tiết.
-  4. **Luyện viết nét (Stroke Lab)**: Trực quan hóa thứ tự nét và thực hành vẽ trực tiếp trên canvas.
+  4. **Luyện viết (Stroke Lab)**: Xem thứ tự nét chuẩn và tự viết lại ngay bên cạnh.
 - **Lưu trữ tiến độ (Offline & LocalStorage)**:
   - Tự động lưu chữ đã thuộc, danh sách yêu thích (Bookmark).
   - Hỗ trợ **Export / Import tiến độ** dưới dạng tệp JSON.
-- **Giao diện Pro Max (Developer-grade Dark UI)**:
-  - Thiết kế tông tối dịu mắt (`#090a0f`), viền nét tinh tế, font tiếng Nhật chuẩn xác.
-  - Không bloatware, không hiệu ứng rườm rà, tải toàn bộ web chỉ trong ~300KB gzip.
+- **Giao diện tông mực tàu**:
+  - Nền mực ấm, chữ màu giấy, màu son cho nét đang viết và nút chính, màu vàng kim cho âm Hán Việt.
+  - Font **Be Vietnam Pro** cho tiếng Việt, **Klee One** (kiểu chữ sách giáo khoa Nhật) cho chữ Hán lớn để thấy rõ cách viết, **Noto Sans JP** cho âm đọc.
+  - Tôn trọng cài đặt giảm chuyển động (`prefers-reduced-motion`): không tự chạy hoạt ảnh, thẻ nhớ chuyển mờ thay vì lật.
 
 ---
 
@@ -90,10 +92,11 @@ Mở trình duyệt tại `http://localhost:5173`.
 | :--- | :--- |
 | `/` | Đưa con trỏ nhanh vào ô tìm kiếm |
 | `Space` | Lật mặt thẻ Flashcard |
-| `←` / `→` | Chuyển thẻ Flashcard trước / sau |
+| `←` / `→` | Chuyển thẻ Flashcard, chữ trong cửa sổ chi tiết hoặc trong Luyện viết |
 | `S` | Phát âm âm thanh chữ Hán đang học |
 | `1` `2` `3` `4` | Chọn đáp án trắc nghiệm trong chế độ Quiz |
 | `Enter` | Chuyển sang câu hỏi trắc nghiệm tiếp theo |
+| `←` / `→` (trên thanh tiến trình nét) | Lùi / tiến một nét |
 | `Esc` | Đóng cửa sổ chi tiết chữ Hán |
 
 ---
