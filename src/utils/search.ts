@@ -1,8 +1,8 @@
 import type { KanjiItem } from '../types/kanji';
 
 /**
- * Lowercase and strip Vietnamese diacritics so "nhat", "Nhật" and "NHẬT" all match.
- * Kana and kanji pass through unchanged (NFC is restored after stripping marks).
+ * Lowercase and strip Vietnamese diacritics so "nhat", "Nhật" and "NHẬT" all match, and fold
+ * katakana to hiragana so "がく" finds the On reading ガク. Kanji pass through unchanged.
  */
 export function foldText(text: string): string {
   return text
@@ -10,6 +10,7 @@ export function foldText(text: string): string {
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .replace(/đ/g, 'd')
+    .replace(/[ァ-ヶ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60))
     .normalize('NFC');
 }
 

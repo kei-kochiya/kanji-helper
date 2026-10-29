@@ -56,6 +56,11 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* Any Japanese run gets the Japanese face (and its glyph forms), even without a font class */
+  :lang(ja) {
+    font-family: var(--font-jp);
+  }
+
   ::selection {
     background-color: rgb(239 107 76 / 0.35);
     color: var(--color-paper);

@@ -1,47 +1,73 @@
 import React, { useState, useMemo, useEffect, useRef, useDeferredValue, useCallback } from 'react';
-import { Search, X, Bookmark, CheckCircle2, SearchX, Shuffle } from 'lucide-react';
-import kanjiRawData from './data/kanji_data.json';
-import type { KanjiItem, JLPTLevel, ViewMode, UserProgress } from './types/kanji';
+import { SearchX } from 'lucide-react';
+import type { KanjiItem, JLPTLevel, ViewMode, UserProgress, SortOption, StatusFilter } from './types/kanji';
 import { Header } from './components/Header';
-import { LevelFilter } from './components/LevelFilter';
+import { FilterPanel } from './components/FilterPanel';
 import { KanjiCard } from './components/KanjiCard';
 import { KanjiDetailModal } from './components/KanjiDetailModal';
 import { FlashcardMode } from './components/FlashcardMode';
 import { QuizMode } from './components/QuizMode';
 import { StrokeOrderPad } from './components/StrokeOrderPad';
-import { loadUserProgress, saveUserProgress, exportProgressJSON, importProgressJSON } from './utils/storage';
+import {
+  loadUserProgress,
+  saveUserProgress,
+  exportProgressJSON,
+  importProgressJSON,
+  loadFilterPrefs,
+  saveFilterPrefs,
+} from './utils/storage';
 import { ALL_LEVELS } from './utils/levels';
 import { buildSearchIndex, foldText } from './utils/search';
 import { shuffled } from './utils/random';
+import { isTypingTarget } from './utils/dom';
+import { DIALOG_STATE, pushLocation, readLocation, replaceLocation } from './utils/url';
+import { SPEECH_UNAVAILABLE_EVENT } from './utils/speech';
+import type { SpeechUnavailableReason } from './utils/speech';
 
-const KANJI_DATA: KanjiItem[] = kanjiRawData as KanjiItem[];
-const SEARCH_INDEX = buildSearchIndex(KANJI_DATA);
 const ITEMS_PER_PAGE = 96;
+const BASE_TITLE = document.title;
+const MODE_TITLES: Record<ViewMode, string> = {
+  grid: BASE_TITLE,
+  flashcard: 'Thẻ nhớ · Kanji Helper',
+  quiz: 'Trắc nghiệm · Kanji Helper',
+  strokes: 'Luyện viết · Kanji Helper',
+};
+const SPEECH_MESSAGES: Record<SpeechUnavailableReason, string> = {
+  unsupported: 'Trình duyệt này không hỗ trợ đọc thành tiếng. Hãy thử Chrome, Edge hoặc Safari.',
+  'no-voice': 'Máy chưa có giọng đọc tiếng Nhật. Hãy cài giọng Nhật trong phần ngôn ngữ của hệ điều hành, hoặc mở trang bằng Chrome/Edge.',
+};
 
-type SortOption = 'default' | 'strokes_asc' | 'strokes_desc' | 'random';
-type StatusFilter = 'all' | 'starred' | 'unmastered' | 'mastered';
 type Toast = { id: number; message: string; tone: 'ok' | 'bad' };
 
-const makeRandomRank = () => new Map(shuffled(KANJI_DATA.map((k) => k.id)).map((id, i) => [id, i]));
+const makeRandomRank = (list: KanjiItem[]) => new Map(shuffled(list.map((k) => k.id)).map((id, i) => [id, i]));
 
-const isTypingTarget = (el: EventTarget | null) =>
-  el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
+  const searchIndex = useMemo(() => buildSearchIndex(kanjiData), [kanjiData]);
+  const byId = useMemo(() => new Map(kanjiData.map((k) => [k.id, k])), [kanjiData]);
+  const validIds = useMemo(() => new Set(byId.keys()), [byId]);
 
-export function App() {
-  const [currentMode, setCurrentMode] = useState<ViewMode>('grid');
+  // Where we are comes from the address bar so reload and Back keep your place
+  const [initialLocation] = useState(() => readLocation());
+  const [currentMode, setCurrentMode] = useState<ViewMode>(initialLocation.mode);
+  const [activeKanji, setActiveKanji] = useState<KanjiItem | null>(() =>
+    initialLocation.mode === 'grid' && initialLocation.kanjiId ? byId.get(initialLocation.kanjiId) ?? null : null
+  );
+  const [flashStartId, setFlashStartId] = useState(() => (initialLocation.mode === 'flashcard' ? initialLocation.kanjiId : null));
+  const [padTargetId, setPadTargetId] = useState(() => (initialLocation.mode === 'strokes' ? initialLocation.kanjiId : null));
+  const [padIndex, setPadIndex] = useState(0);
 
-  // Filters
-  const [selectedLevels, setSelectedLevels] = useState<Set<JLPTLevel>>(() => new Set(ALL_LEVELS));
+  // Filters: levels, status and sort are remembered; the search box starts empty
+  const [initialPrefs] = useState(loadFilterPrefs);
+  const [selectedLevels, setSelectedLevels] = useState<Set<JLPTLevel>>(() => new Set(initialPrefs.levels));
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialPrefs.status);
+  const [sortBy, setSortBy] = useState<SortOption>(initialPrefs.sort);
+  const [randomRank, setRandomRank] = useState(() => (initialPrefs.sort === 'random' ? makeRandomRank(kanjiData) : null));
   const [searchQuery, setSearchQuery] = useState('');
   const deferredQuery = useDeferredValue(searchQuery);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [sortBy, setSortBy] = useState<SortOption>('default');
-  const [randomRank, setRandomRank] = useState<Map<string, number> | null>(null);
   const [displayLimit, setDisplayLimit] = useState(ITEMS_PER_PAGE);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const [progress, setProgress] = useState<UserProgress>(() => loadUserProgress());
-  const [activeKanji, setActiveKanji] = useState<KanjiItem | null>(null);
-  const [padIndex, setPadIndex] = useState(0);
+  const [progress, setProgress] = useState<UserProgress>(() => loadUserProgress(validIds));
   const [toast, setToast] = useState<Toast | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -52,8 +78,12 @@ export function App() {
   }, [progress]);
 
   useEffect(() => {
+    saveFilterPrefs({ levels: ALL_LEVELS.filter((l) => selectedLevels.has(l)), status: statusFilter, sort: sortBy });
+  }, [selectedLevels, statusFilter, sortBy]);
+
+  useEffect(() => {
     if (!toast) return;
-    const id = window.setTimeout(() => setToast(null), 3200);
+    const id = window.setTimeout(() => setToast(null), 4200);
     return () => window.clearTimeout(id);
   }, [toast]);
 
@@ -61,25 +91,60 @@ export function App() {
     setToast({ id: Date.now(), message, tone });
   }, []);
 
+  useEffect(() => {
+    const onUnavailable = (e: Event) => showToast(SPEECH_MESSAGES[(e as CustomEvent<SpeechUnavailableReason>).detail], 'bad');
+    window.addEventListener(SPEECH_UNAVAILABLE_EVENT, onUnavailable);
+    return () => window.removeEventListener(SPEECH_UNAVAILABLE_EVENT, onUnavailable);
+  }, [showToast]);
+
+  // Browser Back/Forward: follow the address bar
+  useEffect(() => {
+    const onPop = () => {
+      const loc = readLocation();
+      setCurrentMode(loc.mode);
+      setFiltersOpen(false);
+      setActiveKanji(loc.mode === 'grid' && loc.kanjiId ? byId.get(loc.kanjiId) ?? null : null);
+      if (loc.mode === 'flashcard') setFlashStartId(loc.kanjiId);
+      if (loc.mode === 'strokes') setPadTargetId(loc.kanjiId);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [byId]);
+
+  // Drop an unknown ?chu= from a shared or stale link
+  useEffect(() => {
+    if (initialLocation.kanjiId && !byId.has(initialLocation.kanjiId)) replaceLocation({ mode: initialLocation.mode, kanjiId: null });
+  }, [initialLocation, byId]);
+
+  useEffect(() => {
+    document.title = activeKanji ? `${activeKanji.c} ${activeKanji.hv.join(' · ')} · Kanji Helper` : MODE_TITLES[currentMode];
+  }, [activeKanji, currentMode]);
+
+  const collapsible = currentMode !== 'grid';
+
   // "/" focuses search from anywhere except while typing or inside the dialog
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '/' && !isTypingTarget(e.target) && !activeKanji) {
-        e.preventDefault();
+      if (e.key !== '/' || isTypingTarget(e.target) || activeKanji) return;
+      e.preventDefault();
+      if (collapsible && !filtersOpen) {
+        setFiltersOpen(true);
+        requestAnimationFrame(() => searchInputRef.current?.focus());
+      } else {
         searchInputRef.current?.focus();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeKanji]);
+  }, [activeKanji, collapsible, filtersOpen]);
 
   const levelCounts = useMemo(() => {
     const counts: Record<JLPTLevel, number> = { N5: 0, N4: 0, N3: 0, N2: 0, N1: 0 };
-    for (const k of KANJI_DATA) {
+    for (const k of kanjiData) {
       if (counts[k.lvl] !== undefined) counts[k.lvl]++;
     }
     return counts;
-  }, []);
+  }, [kanjiData]);
 
   const starredSet = useMemo(() => new Set(progress.starred), [progress.starred]);
   const masteredSet = useMemo(() => new Set(progress.mastered), [progress.mastered]);
@@ -102,14 +167,9 @@ export function App() {
     setDisplayLimit(ITEMS_PER_PAGE);
   };
 
-  const handleClearAllLevels = () => {
-    setSelectedLevels(new Set<JLPTLevel>(['N5']));
-    setDisplayLimit(ITEMS_PER_PAGE);
-  };
-
   const handleSortChange = (value: SortOption) => {
     setSortBy(value);
-    if (value === 'random') setRandomRank(makeRandomRank());
+    if (value === 'random') setRandomRank(makeRandomRank(kanjiData));
   };
 
   const handleToggleStar = (id: string, e?: React.MouseEvent) => {
@@ -129,48 +189,89 @@ export function App() {
 
   // Progress only feeds the list when a status filter needs it, so marking a card
   // as mastered under "Tất cả" does not rebuild the list (and reset the flashcard deck)
-  const statusIds =
-    statusFilter === 'starred' ? progress.starred : statusFilter === 'all' ? null : progress.mastered;
+  const statusIds = statusFilter === 'starred' ? progress.starred : statusFilter === 'all' ? null : progress.mastered;
 
   const filteredKanji = useMemo(() => {
     const query = foldText(deferredQuery.trim());
     const statusSet = statusIds ? new Set(statusIds) : null;
 
-    const list = KANJI_DATA.filter((k) => {
+    const list = kanjiData.filter((k) => {
       if (!selectedLevels.has(k.lvl)) return false;
       if (statusSet) {
         const inSet = statusSet.has(k.id);
         if (statusFilter === 'unmastered' ? inSet : !inSet) return false;
       }
-      return !query || (SEARCH_INDEX.get(k.id) ?? '').includes(query);
+      return !query || (searchIndex.get(k.id) ?? '').includes(query);
     });
 
     if (sortBy === 'strokes_asc') list.sort((a, b) => a.st - b.st);
     else if (sortBy === 'strokes_desc') list.sort((a, b) => b.st - a.st);
     else if (sortBy === 'random' && randomRank) list.sort((a, b) => (randomRank.get(a.id) ?? 0) - (randomRank.get(b.id) ?? 0));
     return list;
-  }, [selectedLevels, deferredQuery, statusFilter, statusIds, sortBy, randomRank]);
+  }, [kanjiData, searchIndex, selectedLevels, deferredQuery, statusFilter, statusIds, sortBy, randomRank]);
+
+  // A writing-lab kanji named by the URL is resolved once the list is known
+  if (padTargetId !== null) {
+    const idx = filteredKanji.findIndex((k) => k.id === padTargetId);
+    setPadIndex(Math.max(0, idx));
+    setPadTargetId(null);
+  }
+
+  const handleSelectMode = (mode: ViewMode) => {
+    if (mode === currentMode && !activeKanji) return;
+    setCurrentMode(mode);
+    setActiveKanji(null);
+    setPadIndex(0);
+    setFlashStartId(null);
+    setFiltersOpen(false);
+    pushLocation({ mode, kanjiId: null });
+  };
+
+  const handleOpenKanji = useCallback((k: KanjiItem) => {
+    setActiveKanji(k);
+    pushLocation({ mode: 'grid', kanjiId: k.id }, DIALOG_STATE);
+  }, []);
 
   const activeKanjiIndex = useMemo(
     () => (activeKanji ? filteredKanji.findIndex((k) => k.id === activeKanji.id) : -1),
     [activeKanji, filteredKanji]
   );
 
+  const showInDialog = useCallback((k: KanjiItem) => {
+    setActiveKanji(k);
+    replaceLocation({ mode: 'grid', kanjiId: k.id });
+  }, []);
+
   const handleModalPrev = useCallback(() => {
-    if (activeKanjiIndex > 0) setActiveKanji(filteredKanji[activeKanjiIndex - 1]);
-  }, [activeKanjiIndex, filteredKanji]);
+    if (activeKanjiIndex > 0) showInDialog(filteredKanji[activeKanjiIndex - 1]);
+  }, [activeKanjiIndex, filteredKanji, showInDialog]);
 
   const handleModalNext = useCallback(() => {
-    if (activeKanjiIndex >= 0 && activeKanjiIndex < filteredKanji.length - 1) {
-      setActiveKanji(filteredKanji[activeKanjiIndex + 1]);
-    }
-  }, [activeKanjiIndex, filteredKanji]);
+    if (activeKanjiIndex >= 0 && activeKanjiIndex < filteredKanji.length - 1) showInDialog(filteredKanji[activeKanjiIndex + 1]);
+  }, [activeKanjiIndex, filteredKanji, showInDialog]);
 
-  const handleCloseModal = useCallback(() => setActiveKanji(null), []);
+  // Closing goes Back when the dialog has its own history entry, so phone Back and the X agree
+  const handleCloseModal = useCallback(() => {
+    if (window.history.state === DIALOG_STATE) {
+      window.history.back();
+    } else {
+      replaceLocation({ mode: 'grid', kanjiId: null });
+      setActiveKanji(null);
+    }
+  }, []);
+
+  const handleFlashcardChange = useCallback((id: string) => {
+    replaceLocation({ mode: 'flashcard', kanjiId: id });
+  }, []);
 
   // The writing lab keeps its position when the list shrinks, but never points past the end
   const safePadIndex = Math.min(padIndex, Math.max(0, filteredKanji.length - 1));
   const padKanji = filteredKanji[safePadIndex];
+  const padKanjiId = currentMode === 'strokes' ? padKanji?.id : undefined;
+
+  useEffect(() => {
+    if (padKanjiId) replaceLocation({ mode: 'strokes', kanjiId: padKanjiId });
+  }, [padKanjiId]);
 
   const handleExport = () => {
     exportProgressJSON(progress);
@@ -181,10 +282,11 @@ export function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const imported = await importProgressJSON(file);
+      const { progress: imported, ignored } = await importProgressJSON(file, validIds);
       setProgress(imported);
       showToast(
-        `Đã khôi phục: ${imported.mastered.length.toLocaleString('vi-VN')} chữ đã thuộc, ${imported.starred.length.toLocaleString('vi-VN')} chữ đã lưu.`
+        `Đã khôi phục: ${imported.mastered.length.toLocaleString('vi-VN')} chữ đã thuộc, ${imported.starred.length.toLocaleString('vi-VN')} chữ đã lưu.` +
+          (ignored > 0 ? ` Bỏ qua ${ignored.toLocaleString('vi-VN')} mục không có trong dữ liệu.` : '')
       );
     } catch {
       showToast('Tệp không hợp lệ. Hãy chọn tệp .json được xuất từ Kanji Helper.', 'bad');
@@ -199,143 +301,48 @@ export function App() {
     handleSelectAllLevels();
   };
 
-  const statusButton = (value: StatusFilter, label: React.ReactNode, activeClass: string) => (
-    <button
-      type="button"
-      onClick={() => {
-        setStatusFilter(value);
-        setDisplayLimit(ITEMS_PER_PAGE);
-      }}
-      aria-pressed={statusFilter === value}
-      className={`inline-flex items-center justify-center gap-1.5 h-8 px-1.5 sm:px-3 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
-        statusFilter === value ? activeClass : 'text-paper-2 hover:text-paper'
-      }`}
-    >
-      {label}
-    </button>
-  );
-
   return (
     <div className="min-h-screen flex flex-col">
       <input ref={fileInputRef} type="file" accept=".json,application/json" onChange={handleFileChange} className="hidden" />
 
       <Header
         currentMode={currentMode}
-        onSelectMode={(mode) => {
-          setCurrentMode(mode);
-          setPadIndex(0);
-        }}
+        onSelectMode={handleSelectMode}
         masteredCount={progress.mastered.length}
         starredCount={progress.starred.length}
-        totalKanji={KANJI_DATA.length}
+        totalKanji={kanjiData.length}
         onExport={handleExport}
         onImport={() => fileInputRef.current?.click()}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 sm:py-6">
-        {/* Filters apply to every mode */}
-        <section aria-label="Bộ lọc" className="rounded-2xl bg-ink-900 border border-line p-3 sm:p-4 mb-6 flex flex-col gap-3">
-          <div className="flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
-            <div className="relative flex-1 lg:max-w-xl">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-paper-3 pointer-events-none" aria-hidden="true" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                inputMode="search"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setDisplayLimit(ITEMS_PER_PAGE);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape' && searchQuery) {
-                    e.stopPropagation();
-                    setSearchQuery('');
-                  }
-                }}
-                aria-label="Tìm chữ Hán"
-                placeholder="Tìm chữ, Hán Việt, nghĩa, On/Kun… (vd: nhat, học, よむ)"
-                className="w-full h-10 bg-ink-950 text-sm text-paper placeholder:text-paper-3 pl-10 pr-10 rounded-xl border border-line focus:border-shu/60 focus:outline-none transition-colors"
-              />
-              {searchQuery ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    searchInputRef.current?.focus();
-                  }}
-                  aria-label="Xóa từ khóa"
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 grid place-items-center w-7 h-7 rounded-md text-paper-3 hover:text-paper cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              ) : (
-                <kbd className="hidden sm:block absolute right-3 top-1/2 -translate-y-1/2 select-none" aria-hidden="true">
-                  /
-                </kbd>
-              )}
-            </div>
-
-            <div className="grid grid-cols-4 sm:flex items-center gap-0.5 p-1 rounded-lg bg-ink-950 border border-line sm:self-start lg:self-auto">
-              {statusButton('all', 'Tất cả', 'bg-ink-800 text-paper')}
-              {statusButton(
-                'starred',
-                <>
-                  <Bookmark className="w-3.5 h-3.5 hidden sm:block" aria-hidden="true" />
-                  Đã lưu <span className="tabular-nums opacity-80">{progress.starred.length}</span>
-                </>,
-                'bg-kin/12 text-kin'
-              )}
-              {statusButton('unmastered', 'Chưa thuộc', 'bg-ink-800 text-paper')}
-              {statusButton(
-                'mastered',
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5 hidden sm:block" aria-hidden="true" />
-                  Đã thuộc <span className="tabular-nums opacity-80">{progress.mastered.length}</span>
-                </>,
-                'bg-ok/12 text-ok'
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t border-line">
-            <LevelFilter
-              selectedLevels={selectedLevels}
-              onToggleLevel={handleToggleLevel}
-              onSelectAll={handleSelectAllLevels}
-              onClearAll={handleClearAllLevels}
-              levelCounts={levelCounts}
-            />
-
-            <div className="flex items-center gap-2 self-start md:self-auto">
-              <label htmlFor="sort-select" className="text-xs text-paper-3">
-                Sắp xếp
-              </label>
-              <select
-                id="sort-select"
-                value={sortBy}
-                onChange={(e) => handleSortChange(e.target.value as SortOption)}
-                className="h-8 bg-ink-950 text-xs text-paper pl-2.5 pr-7 rounded-lg border border-line focus:border-shu/60 focus:outline-none cursor-pointer"
-              >
-                <option value="default">Mặc định (N5 → N1)</option>
-                <option value="strokes_asc">Số nét tăng dần</option>
-                <option value="strokes_desc">Số nét giảm dần</option>
-                <option value="random">Ngẫu nhiên</option>
-              </select>
-              {sortBy === 'random' && (
-                <button
-                  type="button"
-                  onClick={() => setRandomRank(makeRandomRank())}
-                  aria-label="Trộn lại thứ tự"
-                  title="Trộn lại"
-                  className="grid place-items-center w-8 h-8 rounded-lg text-paper-2 hover:text-paper hover:bg-ink-850 transition-colors cursor-pointer"
-                >
-                  <Shuffle className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          </div>
-        </section>
+        <FilterPanel
+          query={searchQuery}
+          onQueryChange={(q) => {
+            setSearchQuery(q);
+            setDisplayLimit(ITEMS_PER_PAGE);
+          }}
+          status={statusFilter}
+          onStatusChange={(s) => {
+            setStatusFilter(s);
+            setDisplayLimit(ITEMS_PER_PAGE);
+          }}
+          starredCount={progress.starred.length}
+          masteredCount={progress.mastered.length}
+          selectedLevels={selectedLevels}
+          onToggleLevel={handleToggleLevel}
+          onSelectAllLevels={handleSelectAllLevels}
+          levelCounts={levelCounts}
+          sortBy={sortBy}
+          onSortChange={handleSortChange}
+          onReshuffle={() => setRandomRank(makeRandomRank(kanjiData))}
+          resultCount={filteredKanji.length}
+          collapsible={collapsible}
+          expanded={filtersOpen}
+          onExpandedChange={setFiltersOpen}
+          note={currentMode === 'quiz' ? 'áp dụng khi bắt đầu bài mới' : undefined}
+          searchInputRef={searchInputRef}
+        />
 
         {currentMode === 'grid' && (
           <div>
@@ -377,7 +384,7 @@ export function App() {
                       kanji={kanji}
                       isStarred={starredSet.has(kanji.id)}
                       isMastered={masteredSet.has(kanji.id)}
-                      onSelect={setActiveKanji}
+                      onSelect={handleOpenKanji}
                       onToggleStar={handleToggleStar}
                     />
                   ))}
@@ -406,6 +413,8 @@ export function App() {
             isMastered={(id) => masteredSet.has(id)}
             onToggleStar={handleToggleStar}
             onToggleMaster={handleToggleMaster}
+            initialId={flashStartId}
+            onCurrentChange={handleFlashcardChange}
           />
         )}
 
@@ -453,9 +462,7 @@ export function App() {
 
       <footer className="mt-auto border-t border-line py-6 text-xs text-paper-3">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
-          <p>
-            Kanji Helper · N5 → N1 · {KANJI_DATA.length.toLocaleString('vi-VN')} Hán tự
-          </p>
+          <p>Kanji Helper · N5 → N1 · {kanjiData.length.toLocaleString('vi-VN')} Hán tự</p>
           <p>
             Dữ liệu: OpenJLPT, KanjiDictVN, KanjiVG (CC BY-SA 3.0) ·{' '}
             <a
@@ -472,5 +479,3 @@ export function App() {
     </div>
   );
 }
-
-export default App;

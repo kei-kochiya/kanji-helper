@@ -11,7 +11,10 @@ export const LEVEL_STYLES: Record<JLPTLevel, { text: string; dot: string; chip: 
   N1: { text: 'text-n1', dot: 'bg-n1', chip: 'bg-n1/12 text-n1 border-n1/40' },
 };
 
-/** Small level marker: coloured dot + level name. */
-export function levelLabelClass(lvl: JLPTLevel): string {
-  return `inline-flex items-center gap-1.5 text-xs font-semibold tabular-nums ${LEVEL_STYLES[lvl].text}`;
+/** "N5–N1", "N5–N3", "N5, N3" */
+export function summarizeLevels(selected: Set<JLPTLevel>): string {
+  const picked = ALL_LEVELS.filter((l) => selected.has(l));
+  const first = ALL_LEVELS.indexOf(picked[0]);
+  const contiguous = picked.every((l, i) => ALL_LEVELS.indexOf(l) === first + i);
+  return contiguous && picked.length > 2 ? `${picked[0]}–${picked[picked.length - 1]}` : picked.join(', ');
 }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Pause, RotateCcw, StepBack, StepForward, Hash, RefreshCw } from 'lucide-react';
 import { useReducedMotion } from '../utils/motion';
+import { pointAt, useStrokes } from '../utils/strokes';
 
 interface StrokePlayerProps {
   code: string;
@@ -12,27 +13,6 @@ interface StrokePlayerProps {
   autoPlay?: boolean;
 }
 
-interface StrokeGeometry {
-  d: string;
-  len: number;
-  /** Points sampled along the path, flattened as [x0, y0, x1, y1, …]. */
-  pts: number[];
-}
-
-interface StrokeData {
-  strokes: StrokeGeometry[];
-  numbers: ({ x: number; y: number } | undefined)[];
-}
-
-class StrokeLoadError extends Error {
-  readonly missing: boolean;
-  constructor(missing: boolean) {
-    super(missing ? 'KanjiVG has no file for this character' : 'Failed to load KanjiVG');
-    this.missing = missing;
-  }
-}
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPEEDS = [0.5, 1, 2] as const;
 /** Pause between two strokes, in ms at 1× speed. */
 const GAP_MS = 170;
@@ -41,95 +21,6 @@ const strokeMs = (len: number) => 200 + len * 8;
 /** Brush pace: settle into the stroke, sweep, slow into the end. */
 const easeBrush = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-
-const cache = new Map<string, Promise<StrokeData>>();
-
-function strokeIndex(el: Element): number {
-  const m = (el.getAttribute('id') ?? '').match(/-s(\d+)$/);
-  return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
-}
-
-function parseKanjiVG(text: string): { paths: string[]; numbers: ({ x: number; y: number } | undefined)[] } {
-  const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
-  const paths = Array.from(doc.querySelectorAll('path'))
-    .map((p, order) => ({ d: p.getAttribute('d') ?? '', order, idx: strokeIndex(p) }))
-    .filter((p) => p.d)
-    .sort((a, b) => a.idx - b.idx || a.order - b.order)
-    .map((p) => p.d);
-
-  const numbers: ({ x: number; y: number } | undefined)[] = new Array(paths.length);
-  Array.from(doc.querySelectorAll('text')).forEach((t, order) => {
-    // KanjiVG writes `matrix(1 0 0 1 x y)` with spaces; accept commas as well
-    const m = (t.getAttribute('transform') ?? '').match(/matrix\(([^)]+)\)/);
-    const parts = m ? m[1].trim().split(/[\s,]+/).map(Number) : [];
-    const pos =
-      parts.length === 6
-        ? { x: parts[4], y: parts[5] }
-        : { x: Number(t.getAttribute('x') ?? 0), y: Number(t.getAttribute('y') ?? 0) };
-    const n = Number(t.textContent);
-    const slot = Number.isInteger(n) && n >= 1 ? n - 1 : order;
-    if (slot < numbers.length) numbers[slot] = pos;
-  });
-
-  return { paths, numbers };
-}
-
-/** Measure each path once in a hidden SVG so drawing can follow the real stroke length. */
-function measure(paths: string[]): StrokeGeometry[] {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('width', '0');
-  svg.setAttribute('height', '0');
-  svg.style.position = 'absolute';
-  svg.style.visibility = 'hidden';
-  document.body.appendChild(svg);
-  try {
-    return paths.map((d) => {
-      const el = document.createElementNS(SVG_NS, 'path');
-      el.setAttribute('d', d);
-      svg.appendChild(el);
-      const len = el.getTotalLength();
-      const samples = Math.max(2, Math.ceil(len / 1.25) + 1);
-      const pts: number[] = [];
-      for (let i = 0; i < samples; i++) {
-        const p = el.getPointAtLength((len * i) / (samples - 1));
-        pts.push(p.x, p.y);
-      }
-      return { d, len, pts };
-    });
-  } finally {
-    svg.remove();
-  }
-}
-
-function loadStrokes(code: string): Promise<StrokeData> {
-  let pending = cache.get(code);
-  if (!pending) {
-    pending = fetch(`https://cdn.jsdelivr.net/gh/KanjiVG/kanjivg/kanji/${code}.svg`)
-      .then((res) => {
-        if (!res.ok) throw new StrokeLoadError(res.status === 404);
-        return res.text();
-      })
-      .then((text) => {
-        const { paths, numbers } = parseKanjiVG(text);
-        if (paths.length === 0) throw new StrokeLoadError(true);
-        return { strokes: measure(paths), numbers };
-      });
-    // Network failures may be transient: drop them so "Thử lại" refetches
-    pending.catch((err) => {
-      if (!(err instanceof StrokeLoadError && err.missing)) cache.delete(code);
-    });
-    cache.set(code, pending);
-  }
-  return pending;
-}
-
-function pointAt(pts: number[], t: number): [number, number] {
-  const count = pts.length / 2;
-  const pos = clamp01(t) * (count - 1);
-  const i = Math.min(count - 2, Math.floor(pos));
-  const f = pos - i;
-  return [pts[i * 2] + (pts[i * 2 + 2] - pts[i * 2]) * f, pts[i * 2 + 1] + (pts[i * 2 + 3] - pts[i * 2 + 1]) * f];
-}
 
 function usePref<T>(key: string, fallback: T): [T, (v: T) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -178,8 +69,6 @@ interface StrokeStageProps extends StrokePlayerProps {
   onShowNumbersChange: (v: boolean) => void;
 }
 
-type LoadResult = { data: StrokeData } | { error: StrokeLoadError | Error };
-
 const StrokeStage: React.FC<StrokeStageProps> = ({
   code,
   character,
@@ -192,8 +81,6 @@ const StrokeStage: React.FC<StrokeStageProps> = ({
   onShowNumbersChange,
 }) => {
   const reduceMotion = useReducedMotion();
-  const [result, setResult] = useState<LoadResult | null>(null);
-  const [attempt, setAttempt] = useState(0);
   // Infinity = whole character shown; the timeline clamps it
   const [elapsed, setElapsed] = useState(() => (autoPlay && !reduceMotion ? 0 : Infinity));
   const [playing, setPlaying] = useState(false);
@@ -201,20 +88,7 @@ const StrokeStage: React.FC<StrokeStageProps> = ({
   const stopAtRef = useRef<number | null>(null);
   const scrubbingRef = useRef(false);
 
-  useEffect(() => {
-    let alive = true;
-    loadStrokes(code).then(
-      (data) => alive && setResult({ data }),
-      (error: Error) => alive && setResult({ error })
-    );
-    return () => {
-      alive = false;
-    };
-  }, [code, attempt]);
-
-  const data = result && 'data' in result ? result.data : null;
-  const error = result && 'error' in result ? result.error : null;
-  const missing = error instanceof StrokeLoadError && error.missing;
+  const { data, error, missing, retry } = useStrokes(code);
 
   const timeline = useMemo(() => {
     if (!data) return null;
@@ -246,6 +120,7 @@ const StrokeStage: React.FC<StrokeStageProps> = ({
     if (!playing || !timeline) return;
     let raf = 0;
     let last = performance.now();
+    let lastCommit = 0;
     let e = Math.min(elapsedRef.current, timeline.total);
     const tick = (now: number) => {
       // Cap the frame delta so a backgrounded tab resumes where it paused
@@ -258,7 +133,11 @@ const StrokeStage: React.FC<StrokeStageProps> = ({
         setPlaying(false);
         return;
       }
-      seek(e);
+      // High-refresh screens fire 120–240 frames a second; ~60 renders are plenty for the brush
+      if (now - lastCommit >= 15) {
+        lastCommit = now;
+        seek(e);
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -436,10 +315,7 @@ const StrokeStage: React.FC<StrokeStageProps> = ({
                   Không tải được nét viết.
                   <button
                     type="button"
-                    onClick={() => {
-                      setResult(null);
-                      setAttempt((a) => a + 1);
-                    }}
+                    onClick={retry}
                     className="inline-flex items-center gap-1 font-medium text-shu hover:underline underline-offset-2 cursor-pointer"
                   >
                     <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
@@ -557,6 +433,12 @@ const StrokeStage: React.FC<StrokeStageProps> = ({
           </button>
         </div>
       </div>
+
+      {data && n !== totalStrokes && (
+        <p className="text-xs text-paper-3">
+          KanjiVG vẽ theo dạng chữ truyền thống ({n} nét); bảng Jōyō 2010 tính {totalStrokes} nét.
+        </p>
+      )}
     </div>
   );
 };

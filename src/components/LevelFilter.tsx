@@ -6,7 +6,6 @@ interface LevelFilterProps {
   selectedLevels: Set<JLPTLevel>;
   onToggleLevel: (level: JLPTLevel) => void;
   onSelectAll: () => void;
-  onClearAll: () => void;
   levelCounts: Record<JLPTLevel, number>;
 }
 
@@ -18,7 +17,6 @@ export const LevelFilter: React.FC<LevelFilterProps> = ({
   selectedLevels,
   onToggleLevel,
   onSelectAll,
-  onClearAll,
   levelCounts,
 }) => {
   const isAllSelected = selectedLevels.size === ALL_LEVELS.length;
@@ -30,9 +28,9 @@ export const LevelFilter: React.FC<LevelFilterProps> = ({
 
       <button
         type="button"
-        onClick={isAllSelected ? onClearAll : onSelectAll}
+        onClick={onSelectAll}
         aria-pressed={isAllSelected}
-        title={isAllSelected ? 'Chỉ giữ N5' : 'Chọn tất cả cấp độ'}
+        title="Chọn tất cả cấp độ"
         className={`${chipBase} ${isAllSelected ? 'bg-paper text-ink-950 border-paper font-semibold' : chipIdle}`}
       >
         Tất cả

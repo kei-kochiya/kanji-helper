@@ -21,5 +21,14 @@ export type ViewMode = 'grid' | 'flashcard' | 'quiz' | 'strokes';
 export interface UserProgress {
   starred: string[];       // Kanji IDs that are bookmarked
   mastered: string[];      // Kanji IDs marked as mastered
-  quizHighScore: number;
+}
+
+export type SortOption = 'default' | 'strokes_asc' | 'strokes_desc' | 'random';
+export type StatusFilter = 'all' | 'starred' | 'unmastered' | 'mastered';
+
+/** Filter choices remembered between visits (the search box is not). */
+export interface FilterPrefs {
+  levels: JLPTLevel[];
+  status: StatusFilter;
+  sort: SortOption;
 }

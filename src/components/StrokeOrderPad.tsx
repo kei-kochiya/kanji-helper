@@ -3,7 +3,9 @@ import { Eraser, Volume2, Bookmark, CheckCircle2, ChevronLeft, ChevronRight, Eye
 import type { KanjiItem } from '../types/kanji';
 import { StrokePlayer } from './StrokePlayer';
 import { speakJapanese } from '../utils/speech';
-import { LEVEL_STYLES, levelLabelClass } from '../utils/levels';
+import { hasModifier, isTypingTarget } from '../utils/dom';
+import { LevelLabel } from './LevelLabel';
+import { useStrokes } from '../utils/strokes';
 
 interface StrokeOrderPadProps {
   kanjiList: KanjiItem[];
@@ -15,8 +17,6 @@ interface StrokeOrderPadProps {
   onToggleMaster: (id: string) => void;
 }
 
-const isTypingTarget = (el: EventTarget | null) =>
-  el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
 
 const iconButton =
   'grid place-items-center w-9 h-9 rounded-lg text-paper-2 hover:text-paper hover:bg-ink-850 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer';
@@ -36,7 +36,7 @@ export const StrokeOrderPad: React.FC<StrokeOrderPadProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || isTypingTarget(e.target)) return;
+      if (e.defaultPrevented || hasModifier(e) || isTypingTarget(e.target)) return;
       if (e.key === 'ArrowLeft' && canPrev) onNavigate(currentIndex - 1);
       if (e.key === 'ArrowRight' && canNext) onNavigate(currentIndex + 1);
     };
@@ -100,10 +100,7 @@ export const StrokeOrderPad: React.FC<StrokeOrderPadProps> = ({
           <div className="flex items-start justify-between gap-3 mb-5">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-xs text-paper-3 mb-1.5">
-                <span className={levelLabelClass(currentKanji.lvl)}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${LEVEL_STYLES[currentKanji.lvl].dot}`} aria-hidden="true" />
-                  {currentKanji.lvl}
-                </span>
+                <LevelLabel level={currentKanji.lvl} />
                 <span className="tabular-nums">
                   {currentKanji.st} nét · Bộ {currentKanji.rad_vi || <span lang="ja">{currentKanji.rad}</span>}
                 </span>
@@ -153,6 +150,9 @@ const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
   const frameRef = useRef(0);
   const [strokeCount, setStrokeCount] = useState(0);
   const [showGuide, setShowGuide] = useState(true);
+  // Trace the same KanjiVG strokes the player draws; the font glyph is only a fallback
+  const { data: guide } = useStrokes(kanji.code);
+  const target = guide ? guide.strokes.length : kanji.st;
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -244,7 +244,7 @@ const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
     redraw();
   };
 
-  const countTone = strokeCount === 0 ? 'text-paper-3' : strokeCount === kanji.st ? 'text-ok' : strokeCount > kanji.st ? 'text-bad' : 'text-paper-2';
+  const countTone = strokeCount === 0 ? 'text-paper-3' : strokeCount === target ? 'text-ok' : strokeCount > target ? 'text-bad' : 'text-paper-2';
 
   return (
     <section className="rounded-2xl bg-ink-900 border border-line p-5 flex flex-col" aria-label="Bảng luyện viết">
@@ -252,8 +252,8 @@ const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
         <div>
           <h2 className="text-sm font-semibold text-paper">Tự viết theo mẫu</h2>
           <p className={`text-xs tabular-nums mt-0.5 ${countTone}`} aria-live="polite">
-            Đã viết {strokeCount}/{kanji.st} nét
-            {strokeCount > kanji.st ? ' · nhiều hơn số nét chuẩn' : strokeCount === kanji.st ? ' · đủ số nét' : ''}
+            Đã viết {strokeCount}/{target} nét
+            {strokeCount > target ? ' · nhiều hơn số nét mẫu' : strokeCount === target ? ' · đủ số nét' : ''}
           </p>
         </div>
         <div className="flex items-center gap-0.5">
@@ -283,18 +283,25 @@ const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
       </div>
 
       <div className="relative w-full max-w-[26rem] mx-auto aspect-square rounded-xl bg-ink-950 border border-line overflow-hidden select-none">
-        <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">
-          <g className="stroke-ink-700" strokeWidth="0.35" fill="none">
-            <line x1="50" y1="0" x2="50" y2="100" strokeDasharray="1.5 1.5" />
-            <line x1="0" y1="50" x2="100" y2="50" strokeDasharray="1.5 1.5" />
-            <line x1="0" y1="0" x2="100" y2="100" strokeDasharray="0.7 2.2" opacity="0.6" />
-            <line x1="100" y1="0" x2="0" y2="100" strokeDasharray="0.7 2.2" opacity="0.6" />
+        <svg viewBox="0 0 109 109" className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden="true">
+          <g className="stroke-ink-700" strokeWidth="0.4" fill="none">
+            <line x1="54.5" y1="0" x2="54.5" y2="109" strokeDasharray="1.6 1.6" />
+            <line x1="0" y1="54.5" x2="109" y2="54.5" strokeDasharray="1.6 1.6" />
+            <line x1="0" y1="0" x2="109" y2="109" strokeDasharray="0.8 2.4" opacity="0.6" />
+            <line x1="109" y1="0" x2="0" y2="109" strokeDasharray="0.8 2.4" opacity="0.6" />
           </g>
-          {showGuide && (
-            <text x="50" y="52" textAnchor="middle" dominantBaseline="central" fontSize="82" lang="ja" className="font-kanji fill-ink-800">
-              {kanji.c}
-            </text>
-          )}
+          {showGuide &&
+            (guide ? (
+              <g className="stroke-ink-800" strokeWidth="3.6" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                {guide.strokes.map((st, i) => (
+                  <path key={i} d={st.d} />
+                ))}
+              </g>
+            ) : (
+              <text x="54.5" y="57" textAnchor="middle" dominantBaseline="central" fontSize="88" lang="ja" className="font-kanji fill-ink-800">
+                {kanji.c}
+              </text>
+            ))}
         </svg>
 
         <canvas

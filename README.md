@@ -45,9 +45,13 @@
      - Cài đặt giới hạn số câu hỏi (5, 10, 15, 20, 30, 50 câu).
      - Cho phép dừng sớm / thoát bất cứ lúc nào và hiển thị tổng kết bài làm chi tiết.
   4. **Luyện viết (Stroke Lab)**: Xem thứ tự nét chuẩn và tự viết lại ngay bên cạnh.
-- **Lưu trữ tiến độ (Offline & LocalStorage)**:
-  - Tự động lưu chữ đã thuộc, danh sách yêu thích (Bookmark).
-  - Hỗ trợ **Export / Import tiến độ** dưới dạng tệp JSON.
+- **Lưu trữ tiến độ trên máy (LocalStorage)**:
+  - Tự động lưu chữ đã thuộc, danh sách yêu thích (Bookmark) và bộ lọc đang dùng.
+  - Hỗ trợ **Export / Import tiến độ** dưới dạng tệp JSON (chữ không có trong dữ liệu sẽ được bỏ qua và báo lại).
+- **Địa chỉ trang giữ vị trí học**:
+  - Mỗi chế độ có đường dẫn riêng (`/the-nho`, `/trac-nghiem`, `/luyen-viet`), chữ đang xem nằm trong `?chu=` (vd: `/the-nho?chu=学`).
+  - Tải lại trang không mất vị trí; nút Back trên điện thoại đóng cửa sổ chi tiết thay vì rời trang.
+- **Nét viết đóng gói cùng trang**: dữ liệu KanjiVG cho cả 2.383 chữ nằm trong `public/strokes`, không phụ thuộc CDN.
 - **Giao diện tông mực tàu**:
   - Nền mực ấm, chữ màu giấy, màu son cho nét đang viết và nút chính, màu vàng kim cho âm Hán Việt.
   - Font **Be Vietnam Pro** cho tiếng Việt, **Klee One** (kiểu chữ sách giáo khoa Nhật) cho chữ Hán lớn để thấy rõ cách viết, **Noto Sans JP** cho âm đọc.
@@ -64,7 +68,8 @@
 - **Nguồn dữ liệu uy tín**:
   - `OpenJLPT`: Danh mục phân bổ cấp độ Kanji JLPT N5–N1
   - `KanjiDictVN` (trungnt2910): Cơ sở dữ liệu âm Hán Việt và giải nghĩa Hán Nôm
-  - `KanjiVG`: Vector chuẩn thứ tự các nét viết Hán tự Nhật Bản
+  - `KanjiVG`: Vector chuẩn thứ tự các nét viết Hán tự Nhật Bản (tạo lại bằng `python build_strokes.py`)
+- **Kiểm thử**: [Vitest](https://vitest.dev/) cho logic tìm kiếm, trắc nghiệm, thẻ nhớ, URL và kiểm tra dữ liệu nét viết
 
 ---
 
@@ -80,6 +85,12 @@ npm install
 
 # 3. Chạy server phát triển
 npm run dev
+
+# Chạy kiểm thử
+npm test
+
+# (Tuỳ chọn) Tạo lại dữ liệu nét viết từ bản phát hành KanjiVG mới nhất
+python build_strokes.py
 ```
 
 Mở trình duyệt tại `http://localhost:5173`.

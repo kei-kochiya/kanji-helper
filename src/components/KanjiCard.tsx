@@ -2,7 +2,7 @@ import React from 'react';
 import { Bookmark, CheckCircle2, Volume2 } from 'lucide-react';
 import type { KanjiItem } from '../types/kanji';
 import { speakJapanese } from '../utils/speech';
-import { LEVEL_STYLES, levelLabelClass } from '../utils/levels';
+import { LevelLabel } from './LevelLabel';
 
 interface KanjiCardProps {
   kanji: KanjiItem;
@@ -28,10 +28,7 @@ export const KanjiCard: React.FC<KanjiCardProps> = ({ kanji, isStarred, isMaster
         className="w-full h-full text-left p-3.5 rounded-xl cursor-pointer flex flex-col gap-3"
       >
         <span className="flex items-center gap-1.5 h-7 pr-16">
-          <span className={levelLabelClass(kanji.lvl)}>
-            <span className={`w-1.5 h-1.5 rounded-full ${LEVEL_STYLES[kanji.lvl].dot}`} aria-hidden="true" />
-            {kanji.lvl}
-          </span>
+          <LevelLabel level={kanji.lvl} />
           {isMastered && (
             <CheckCircle2 className="w-3.5 h-3.5 text-ok" aria-label="Đã thuộc" role="img" />
           )}

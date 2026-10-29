@@ -1,26 +1,38 @@
-import type { UserProgress } from '../types/kanji';
+import type { FilterPrefs, JLPTLevel, SortOption, StatusFilter, UserProgress } from '../types/kanji';
 
 const STORAGE_KEY = 'kanji_master_progress_v1';
 
-export function loadUserProgress(): UserProgress {
+const EMPTY: UserProgress = { starred: [], mastered: [] };
+
+/**
+ * Keep only known kanji IDs, once each. Anything else in a saved or imported file
+ * (older dataset entries, hand-edited junk) is dropped and counted.
+ */
+export function sanitizeProgress(raw: unknown, validIds: ReadonlySet<string>): { progress: UserProgress; ignored: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const { starred, mastered } = raw as Record<string, unknown>;
+  if (!Array.isArray(starred) || !Array.isArray(mastered)) return null;
+
+  let ignored = 0;
+  const clean = (list: unknown[]) => {
+    const out = new Set<string>();
+    for (const id of list) {
+      if (typeof id === 'string' && validIds.has(id)) out.add(id);
+      else ignored++;
+    }
+    return [...out];
+  };
+  return { progress: { starred: clean(starred), mastered: clean(mastered) }, ignored };
+}
+
+export function loadUserProgress(validIds: ReadonlySet<string>): UserProgress {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return {
-        starred: Array.isArray(parsed.starred) ? parsed.starred : [],
-        mastered: Array.isArray(parsed.mastered) ? parsed.mastered : [],
-        quizHighScore: typeof parsed.quizHighScore === 'number' ? parsed.quizHighScore : 0,
-      };
-    }
+    if (raw) return sanitizeProgress(JSON.parse(raw), validIds)?.progress ?? EMPTY;
   } catch (e) {
     console.error('Failed to parse user progress from localStorage', e);
   }
-  return {
-    starred: [],
-    mastered: [],
-    quizHighScore: 0,
-  };
+  return EMPTY;
 }
 
 export function saveUserProgress(progress: UserProgress): void {
@@ -32,35 +44,48 @@ export function saveUserProgress(progress: UserProgress): void {
 }
 
 export function exportProgressJSON(progress: UserProgress): void {
-  const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(progress, null, 2));
-  const downloadAnchor = document.createElement('a');
-  downloadAnchor.setAttribute('href', dataStr);
-  downloadAnchor.setAttribute('download', `kanji_progress_${new Date().toISOString().slice(0, 10)}.json`);
-  document.body.appendChild(downloadAnchor);
-  downloadAnchor.click();
-  downloadAnchor.remove();
+  const blob = new Blob([JSON.stringify(progress, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `kanji_progress_${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
-export function importProgressJSON(file: File): Promise<UserProgress> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const parsed = JSON.parse(e.target?.result as string);
-        if (parsed && Array.isArray(parsed.starred) && Array.isArray(parsed.mastered)) {
-          resolve({
-            starred: parsed.starred,
-            mastered: parsed.mastered,
-            quizHighScore: parsed.quizHighScore || 0,
-          });
-        } else {
-          reject(new Error('Định dạng tệp không hợp lệ'));
-        }
-      } catch (err) {
-        reject(err);
-      }
+export async function importProgressJSON(file: File, validIds: ReadonlySet<string>): Promise<{ progress: UserProgress; ignored: number }> {
+  const result = sanitizeProgress(JSON.parse(await file.text()), validIds);
+  if (!result) throw new Error('Định dạng tệp không hợp lệ');
+  return result;
+}
+
+const FILTERS_KEY = 'kh.filters';
+const LEVELS: JLPTLevel[] = ['N5', 'N4', 'N3', 'N2', 'N1'];
+const STATUSES: StatusFilter[] = ['all', 'starred', 'unmastered', 'mastered'];
+const SORTS: SortOption[] = ['default', 'strokes_asc', 'strokes_desc', 'random'];
+
+export function loadFilterPrefs(): FilterPrefs {
+  const fallback: FilterPrefs = { levels: LEVELS, status: 'all', sort: 'default' };
+  try {
+    const raw = JSON.parse(localStorage.getItem(FILTERS_KEY) ?? 'null') as Partial<FilterPrefs> | null;
+    if (!raw) return fallback;
+    const levels = Array.isArray(raw.levels) ? LEVELS.filter((l) => raw.levels!.includes(l)) : [];
+    return {
+      levels: levels.length > 0 ? levels : LEVELS,
+      status: STATUSES.includes(raw.status as StatusFilter) ? (raw.status as StatusFilter) : 'all',
+      sort: SORTS.includes(raw.sort as SortOption) ? (raw.sort as SortOption) : 'default',
     };
-    reader.onerror = (err) => reject(err);
-    reader.readAsText(file);
-  });
+  } catch {
+    return fallback;
+  }
+}
+
+export function saveFilterPrefs(prefs: FilterPrefs): void {
+  try {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify(prefs));
+  } catch {
+    /* storage unavailable: filters simply reset next visit */
+  }
 }

@@ -2,8 +2,10 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { RotateCw, Volume2, Bookmark, Check, X, Shuffle, ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
 import type { KanjiItem } from '../types/kanji';
 import { speakJapanese } from '../utils/speech';
-import { LEVEL_STYLES, levelLabelClass } from '../utils/levels';
+import { hasModifier, isTypingTarget } from '../utils/dom';
+import { LevelLabel } from './LevelLabel';
 import { shuffled } from '../utils/random';
+import { followDeck } from '../utils/deck';
 
 interface FlashcardModeProps {
   kanjiList: KanjiItem[];
@@ -11,10 +13,11 @@ interface FlashcardModeProps {
   isMastered: (id: string) => boolean;
   onToggleStar: (id: string) => void;
   onToggleMaster: (id: string) => void;
+  /** Card to start on (from the URL), if it is in the list. */
+  initialId?: string | null;
+  /** Reports the card on screen so the URL can follow it. */
+  onCurrentChange?: (id: string) => void;
 }
-
-const isTypingTarget = (el: EventTarget | null) =>
-  el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
 
 const navButton =
   'grid place-items-center w-12 h-12 shrink-0 rounded-xl bg-ink-900 border border-line text-paper-2 hover:text-paper hover:border-line-strong transition-colors cursor-pointer';
@@ -25,9 +28,11 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
   isMastered,
   onToggleStar,
   onToggleMaster,
+  initialId,
+  onCurrentChange,
 }) => {
   const [deck, setDeck] = useState<KanjiItem[]>(kanjiList);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(() => Math.max(0, initialId ? kanjiList.findIndex((k) => k.id === initialId) : 0));
   const [isFlipped, setIsFlipped] = useState(false);
 
   // Follow the filtered list without losing your place: keep the current card if it is still
@@ -36,16 +41,18 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
   const [syncedKey, setSyncedKey] = useState(listKey);
   if (syncedKey !== listKey) {
     setSyncedKey(listKey);
-    const currentId = deck[currentIndex]?.id;
-    const keptAt = currentId ? kanjiList.findIndex((k) => k.id === currentId) : -1;
-    const oldIds = new Set(deck.map((k) => k.id));
-    const isShrink = kanjiList.every((k) => oldIds.has(k.id));
+    const { index, keptCurrent } = followDeck(deck, currentIndex, kanjiList);
     setDeck(kanjiList);
-    setCurrentIndex(keptAt >= 0 ? keptAt : isShrink ? Math.min(currentIndex, Math.max(0, kanjiList.length - 1)) : 0);
-    if (keptAt < 0) setIsFlipped(false);
+    setCurrentIndex(index);
+    if (!keptCurrent) setIsFlipped(false);
   }
 
   const currentKanji = deck[currentIndex];
+  const currentId = currentKanji?.id;
+
+  useEffect(() => {
+    if (currentId) onCurrentChange?.(currentId);
+  }, [currentId, onCurrentChange]);
 
   const handleNext = useCallback(() => {
     setIsFlipped(false);
@@ -76,7 +83,7 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || isTypingTarget(e.target)) return;
+      if (e.defaultPrevented || hasModifier(e) || isTypingTarget(e.target)) return;
       // Space/Enter on a focused control already activates that control (the card flips itself)
       const onControl = e.target instanceof HTMLElement && e.target.closest('button, a, [role="button"]');
 
@@ -110,10 +117,7 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
   const starred = isStarred(currentKanji.id);
   const mastered = isMastered(currentKanji.id);
   const level = (
-    <span className={levelLabelClass(currentKanji.lvl)}>
-      <span className={`w-1.5 h-1.5 rounded-full ${LEVEL_STYLES[currentKanji.lvl].dot}`} aria-hidden="true" />
-      {currentKanji.lvl}
-    </span>
+    <LevelLabel level={currentKanji.lvl} />
   );
 
   return (

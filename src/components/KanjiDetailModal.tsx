@@ -3,7 +3,8 @@ import { X, Volume2, Bookmark, CheckCircle2, Copy, Check, ChevronLeft, ChevronRi
 import type { KanjiItem } from '../types/kanji';
 import { StrokePlayer } from './StrokePlayer';
 import { speakJapanese } from '../utils/speech';
-import { LEVEL_STYLES, levelLabelClass } from '../utils/levels';
+import { hasModifier } from '../utils/dom';
+import { LevelLabel } from './LevelLabel';
 
 interface KanjiDetailModalProps {
   kanji: KanjiItem | null;
@@ -54,7 +55,7 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
         return;
       }
       // The stroke timeline uses the arrow keys itself
-      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.defaultPrevented || hasModifier(e)) return;
       if (e.key === 'ArrowLeft' && onPrev) onPrev();
       if (e.key === 'ArrowRight' && onNext) onNext();
       if (e.key === 'Tab' && dialogRef.current) {
@@ -107,10 +108,7 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
         {/* Toolbar */}
         <div className="flex items-center justify-between gap-3 pl-5 pr-3 h-14 border-b border-line shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <span className={levelLabelClass(kanji.lvl)}>
-              <span className={`w-1.5 h-1.5 rounded-full ${LEVEL_STYLES[kanji.lvl].dot}`} aria-hidden="true" />
-              {kanji.lvl}
-            </span>
+            <LevelLabel level={kanji.lvl} />
             <span className="font-mono text-[11px] text-paper-3 hidden sm:inline">U+{kanji.code.toUpperCase()}</span>
           </div>
 
