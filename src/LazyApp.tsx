@@ -1,12 +1,18 @@
 import { lazy } from 'react';
-import type { KanjiItem } from './types/kanji';
+import type { RawKanjiItem } from './types/kanji';
+import { hydrateKanjiData } from './utils/dataset';
 
 /**
- * App code and the kanji dataset are separate chunks: the shell paints at once, both load in
- * parallel, and a data update does not invalidate the cached app code (or the other way round).
+ * Start fetching both the app code and dataset immediately when this module loads
+ * (instead of waiting for React.lazy mount) so there is no waterfall.
  */
+const appPromise = Promise.all([import('./App'), import('./data/kanji_data.json')]);
+
 export const LazyApp = lazy(async () => {
-  const [{ App }, data] = await Promise.all([import('./App'), import('./data/kanji_data.json')]);
-  const kanjiData = data.default as KanjiItem[];
-  return { default: () => <App kanjiData={kanjiData} /> };
+  const [{ App }, data] = await appPromise;
+  const kanjiData = hydrateKanjiData(data.default as RawKanjiItem[]);
+  function LoadedApp() {
+    return <App kanjiData={kanjiData} />;
+  }
+  return { default: LoadedApp };
 });

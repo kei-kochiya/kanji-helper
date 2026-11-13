@@ -95,6 +95,71 @@ export function pointAt(pts: number[], t: number): [number, number] {
   return [pts[i * 2] + (pts[i * 2 + 2] - pts[i * 2]) * f, pts[i * 2 + 1] + (pts[i * 2 + 3] - pts[i * 2 + 1]) * f];
 }
 
+export type StrokeFeedback =
+  | { ok: true }
+  | { ok: false; reason: 'too-short' | 'reversed' | 'wrong-position' };
+
+/**
+ * Compares a user-drawn stroke (normalized 0–1 coordinates) against the expected KanjiVG
+ * stroke's sampled points (0–109 coordinate space).
+ */
+export function evaluateStroke(
+  userPts: readonly { x: number; y: number }[],
+  targetPts: readonly number[],
+  boxSize: number = 109
+): StrokeFeedback {
+  if (userPts.length < 2 || targetPts.length < 4) return { ok: false, reason: 'too-short' };
+
+  const scaled = userPts.map((p) => ({ x: p.x * boxSize, y: p.y * boxSize }));
+  let userLen = 0;
+  for (let i = 1; i < scaled.length; i++) {
+    userLen += Math.hypot(scaled[i].x - scaled[i - 1].x, scaled[i].y - scaled[i - 1].y);
+  }
+
+  let targetLen = 0;
+  for (let i = 2; i < targetPts.length; i += 2) {
+    targetLen += Math.hypot(targetPts[i] - targetPts[i - 2], targetPts[i + 1] - targetPts[i - 1]);
+  }
+
+  if (userLen < Math.min(5.5, targetLen * 0.25)) return { ok: false, reason: 'too-short' };
+
+  const uStart = scaled[0];
+  const uEnd = scaled[scaled.length - 1];
+  const tStart = { x: targetPts[0], y: targetPts[1] };
+  const tEnd = { x: targetPts[targetPts.length - 2], y: targetPts[targetPts.length - 1] };
+
+  const startDist = Math.hypot(uStart.x - tStart.x, uStart.y - tStart.y);
+  const endDist = Math.hypot(uEnd.x - tEnd.x, uEnd.y - tEnd.y);
+  const revStartDist = Math.hypot(uStart.x - tEnd.x, uStart.y - tEnd.y);
+  const revEndDist = Math.hypot(uEnd.x - tStart.x, uEnd.y - tStart.y);
+
+  // Detect reversed stroke direction
+  if (revStartDist + revEndDist + 8 < startDist + endDist && revStartDist < 26 && revEndDist < 26) {
+    return { ok: false, reason: 'reversed' };
+  }
+
+  if (startDist > 28 || endDist > 30) {
+    return { ok: false, reason: 'wrong-position' };
+  }
+
+  // Sample 9 points along both paths to verify overall trajectory
+  const samples = 9;
+  let totalDev = 0;
+  for (let s = 0; s < samples; s++) {
+    const t = s / (samples - 1);
+    const idx = Math.min(scaled.length - 1, Math.floor(t * (scaled.length - 1)));
+    const up = scaled[idx];
+    const [tx, ty] = pointAt(targetPts as number[], t);
+    totalDev += Math.hypot(up.x - tx, up.y - ty);
+  }
+  const meanDev = totalDev / samples;
+  if (meanDev > 24 || userLen < targetLen * 0.32 || userLen > targetLen * 2.6) {
+    return { ok: false, reason: 'wrong-position' };
+  }
+
+  return { ok: true };
+}
+
 type LoadResult = { code: string; data: StrokeData } | { code: string; error: Error };
 
 /** Load stroke data for a character; `retry` refetches after a network failure. */

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { RotateCw, Volume2, Bookmark, Check, X, Shuffle, ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
 import type { KanjiItem } from '../types/kanji';
 import { speakJapanese } from '../utils/speech';
@@ -32,15 +32,14 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
   onCurrentChange,
 }) => {
   const [deck, setDeck] = useState<KanjiItem[]>(kanjiList);
+  const [syncedList, setSyncedList] = useState<KanjiItem[]>(kanjiList);
   const [currentIndex, setCurrentIndex] = useState(() => Math.max(0, initialId ? kanjiList.findIndex((k) => k.id === initialId) : 0));
   const [isFlipped, setIsFlipped] = useState(false);
 
   // Follow the filtered list without losing your place: keep the current card if it is still
   // there, let the next card slide in when one was removed, and restart only for a new list.
-  const listKey = useMemo(() => kanjiList.map((k) => k.id).join(','), [kanjiList]);
-  const [syncedKey, setSyncedKey] = useState(listKey);
-  if (syncedKey !== listKey) {
-    setSyncedKey(listKey);
+  if (syncedList !== kanjiList) {
+    setSyncedList(kanjiList);
     const { index, keptCurrent } = followDeck(deck, currentIndex, kanjiList);
     setDeck(kanjiList);
     setCurrentIndex(index);
@@ -258,10 +257,21 @@ export const FlashcardMode: React.FC<FlashcardModeProps> = ({
               <div className="mt-4 pt-4 border-t border-line">
                 <p className="text-xs text-paper-3 mb-2">Từ vựng ví dụ</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {currentKanji.words.slice(0, 6).map((w, idx) => (
-                    <span key={idx} lang="ja" className="font-jp px-2 py-1 text-sm text-paper-2 rounded-md bg-ink-950 border border-line">
-                      {w}
-                    </span>
+                  {currentKanji.words.slice(0, 4).map((w, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void speakJapanese(w.w);
+                      }}
+                      title={w.m ? `${w.r ? `${w.r} · ` : ''}${w.m}` : 'Nghe phát âm'}
+                      className="inline-flex items-baseline gap-1.5 px-2.5 py-1 text-xs rounded-md bg-ink-950 border border-line hover:border-line-strong text-left cursor-pointer transition-colors"
+                    >
+                      <span lang="ja" className="font-jp text-sm text-paper">{w.w}</span>
+                      {w.r && w.r !== w.w && <span lang="ja" className="font-jp text-paper-3">{w.r}</span>}
+                      {w.m && <span className="text-paper-2 truncate max-w-[10rem]">{w.m}</span>}
+                    </button>
                   ))}
                 </div>
               </div>

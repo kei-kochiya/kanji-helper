@@ -5,7 +5,7 @@ import { StrokePlayer } from './StrokePlayer';
 import { speakJapanese } from '../utils/speech';
 import { hasModifier, isTypingTarget } from '../utils/dom';
 import { LevelLabel } from './LevelLabel';
-import { useStrokes } from '../utils/strokes';
+import { evaluateStroke, useStrokes } from '../utils/strokes';
 
 interface StrokeOrderPadProps {
   kanjiList: KanjiItem[];
@@ -16,7 +16,6 @@ interface StrokeOrderPadProps {
   onToggleStar: (id: string) => void;
   onToggleMaster: (id: string) => void;
 }
-
 
 const iconButton =
   'grid place-items-center w-9 h-9 rounded-lg text-paper-2 hover:text-paper hover:bg-ink-850 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer';
@@ -131,6 +130,38 @@ export const StrokeOrderPad: React.FC<StrokeOrderPadProps> = ({
               <dd lang="ja" className="font-jp text-paper">{currentKanji.kun.join('、') || '—'}</dd>
             </div>
           </dl>
+
+          {currentKanji.words.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-line">
+              <p className="text-xs text-paper-3 mb-2">Từ ghép tiêu biểu</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {currentKanji.words.slice(0, 4).map((word, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => speakJapanese(word.w)}
+                    title="Nghe phát âm"
+                    className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-line bg-ink-950 hover:border-line-strong text-left transition-colors cursor-pointer"
+                  >
+                    <span className="min-w-0">
+                      <span className="flex items-baseline gap-1.5">
+                        <span lang="ja" className="font-jp text-sm font-medium text-paper">{word.w}</span>
+                        {word.r && word.r !== word.w && (
+                          <span lang="ja" className="font-jp text-xs text-paper-3 truncate">{word.r}</span>
+                        )}
+                      </span>
+                      <span className="block text-xs text-paper-2 truncate">
+                        {word.hv ? <span className="text-kin font-medium">{word.hv}</span> : null}
+                        {word.hv && word.m ? ' · ' : ''}
+                        {word.m}
+                      </span>
+                    </span>
+                    <Volume2 className="w-3.5 h-3.5 text-paper-3 shrink-0" aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Practice */}
@@ -142,17 +173,30 @@ export const StrokeOrderPad: React.FC<StrokeOrderPadProps> = ({
 
 type Point = { x: number; y: number; w: number };
 
-/** Free-hand practice canvas. Strokes are stored in 0–1 coordinates so they survive resizes. */
+/** Practice canvas supporting both guided stroke-order checking and free-hand writing. */
 const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const strokesRef = useRef<Point[][]>([]);
   const activeRef = useRef<Point[] | null>(null);
   const frameRef = useRef(0);
+  const hintTimerRef = useRef<number | null>(null);
+
   const [strokeCount, setStrokeCount] = useState(0);
   const [showGuide, setShowGuide] = useState(true);
+  const [guided, setGuided] = useState(true);
+  const [hintStroke, setHintStroke] = useState<number | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+
   // Trace the same KanjiVG strokes the player draws; the font glyph is only a fallback
   const { data: guide } = useStrokes(kanji.code);
+  const isGuided = guided && Boolean(guide);
   const target = guide ? guide.strokes.length : kanji.st;
+
+  useEffect(() => {
+    return () => {
+      if (hintTimerRef.current !== null) window.clearTimeout(hintTimerRef.current);
+    };
+  }, []);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -223,17 +267,63 @@ const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
     return { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height, w: pressure };
   };
 
-  const finishStroke = () => {
-    if (!activeRef.current) return;
-    strokesRef.current = [...strokesRef.current, activeRef.current];
+  const resetStrokes = (nextGuided: boolean) => {
+    strokesRef.current = [];
     activeRef.current = null;
-    setStrokeCount(strokesRef.current.length);
+    setStrokeCount(0);
+    setHintStroke(null);
+    setFeedback(null);
+    setGuided(nextGuided);
+    redraw();
+  };
+
+  const flashHint = (idx: number, message: string) => {
+    setHintStroke(idx);
+    setFeedback({ tone: 'bad', text: message });
+    if (hintTimerRef.current !== null) window.clearTimeout(hintTimerRef.current);
+    hintTimerRef.current = window.setTimeout(() => setHintStroke(null), 1100);
+  };
+
+  const finishStroke = () => {
+    const drawn = activeRef.current;
+    if (!drawn) return;
+    activeRef.current = null;
+
+    if (isGuided && guide) {
+      if (strokeCount >= target) {
+        scheduleRedraw();
+        return;
+      }
+      const result = evaluateStroke(drawn, guide.strokes[strokeCount].pts);
+      if (!result.ok) {
+        if (result.reason === 'reversed') {
+          flashHint(strokeCount, 'Ngược chiều nét — hãy kéo từ chấm đỏ.');
+        } else if (result.reason === 'wrong-position') {
+          flashHint(strokeCount, `Chưa đúng nét ${strokeCount + 1} — hãy viết theo nét đỏ.`);
+        }
+        scheduleRedraw();
+        return;
+      }
+    }
+
+    const nextStrokes = [...strokesRef.current, drawn];
+    strokesRef.current = nextStrokes;
+    const nextCount = nextStrokes.length;
+    setStrokeCount(nextCount);
+    setHintStroke(null);
+    if (isGuided && nextCount === target) {
+      setFeedback({ tone: 'ok', text: `Hoàn thành đúng thứ tự cả ${target} nét!` });
+    } else {
+      setFeedback(null);
+    }
     scheduleRedraw();
   };
 
   const handleUndo = () => {
     strokesRef.current = strokesRef.current.slice(0, -1);
     setStrokeCount(strokesRef.current.length);
+    setHintStroke(null);
+    setFeedback(null);
     redraw();
   };
 
@@ -241,22 +331,52 @@ const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
     strokesRef.current = [];
     activeRef.current = null;
     setStrokeCount(0);
+    setHintStroke(null);
+    setFeedback(null);
     redraw();
   };
 
   const countTone = strokeCount === 0 ? 'text-paper-3' : strokeCount === target ? 'text-ok' : strokeCount > target ? 'text-bad' : 'text-paper-2';
+  const nextGuideStroke = isGuided && guide && strokeCount < target ? guide.strokes[strokeCount] : null;
+  const nextGuideNumber = isGuided && guide && strokeCount < target ? guide.numbers[strokeCount] : null;
 
   return (
     <section className="rounded-2xl bg-ink-900 border border-line p-5 flex flex-col" aria-label="Bảng luyện viết">
-      <div className="flex items-center justify-between gap-3 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <div>
           <h2 className="text-sm font-semibold text-paper">Tự viết theo mẫu</h2>
           <p className={`text-xs tabular-nums mt-0.5 ${countTone}`} aria-live="polite">
-            Đã viết {strokeCount}/{target} nét
+            {isGuided ? `Nét ${strokeCount}/${target}` : `Đã viết ${strokeCount}/${target} nét`}
             {strokeCount > target ? ' · nhiều hơn số nét mẫu' : strokeCount === target ? ' · đủ số nét' : ''}
           </p>
         </div>
-        <div className="flex items-center gap-0.5">
+
+        <div className="flex items-center gap-1.5">
+          {guide && (
+            <div className="inline-flex items-center p-0.5 rounded-lg bg-ink-950 border border-line mr-1" role="group" aria-label="Chế độ luyện viết">
+              <button
+                type="button"
+                onClick={() => !guided && resetStrokes(true)}
+                aria-pressed={guided}
+                className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                  guided ? 'bg-ink-800 text-paper' : 'text-paper-3 hover:text-paper'
+                }`}
+              >
+                Chấm nét
+              </button>
+              <button
+                type="button"
+                onClick={() => guided && resetStrokes(false)}
+                aria-pressed={!guided}
+                className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                  !guided ? 'bg-ink-800 text-paper' : 'text-paper-3 hover:text-paper'
+                }`}
+              >
+                Tự do
+              </button>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={() => setShowGuide((v) => !v)}
@@ -302,6 +422,38 @@ const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
                 {kanji.c}
               </text>
             ))}
+
+          {/* Expected next stroke start dot + error hint path in Guided mode */}
+          {isGuided && guide && hintStroke !== null && guide.strokes[hintStroke] && (
+            <path
+              d={guide.strokes[hintStroke].d}
+              fill="none"
+              strokeWidth="3.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="stroke-shu/85"
+            />
+          )}
+          {showGuide && nextGuideStroke && nextGuideStroke.pts.length >= 2 && (
+            <g>
+              <circle cx={nextGuideStroke.pts[0]} cy={nextGuideStroke.pts[1]} r="2.6" className="fill-shu/30" />
+              <circle cx={nextGuideStroke.pts[0]} cy={nextGuideStroke.pts[1]} r="1.4" className="fill-shu" />
+              {nextGuideNumber && (
+                <text
+                  x={nextGuideNumber.x}
+                  y={nextGuideNumber.y}
+                  fontSize="7"
+                  fontWeight="700"
+                  strokeWidth="2.2"
+                  paintOrder="stroke"
+                  strokeLinejoin="round"
+                  className="font-sans fill-shu stroke-ink-950"
+                >
+                  {strokeCount + 1}
+                </text>
+              )}
+            </g>
+          )}
         </svg>
 
         <canvas
@@ -324,7 +476,18 @@ const PracticePad: React.FC<{ kanji: KanjiItem }> = ({ kanji }) => {
         />
       </div>
 
-      <p className="text-xs text-paper-3 mt-3 text-center">Viết bằng chuột, ngón tay hoặc bút cảm ứng, theo đúng thứ tự nét của khung mẫu.</p>
+      <p
+        className={`text-xs mt-3 text-center min-h-[1.25rem] ${
+          feedback?.tone === 'ok' ? 'text-ok font-medium' : feedback?.tone === 'bad' ? 'text-bad font-medium' : 'text-paper-3'
+        }`}
+        aria-live="polite"
+      >
+        {feedback
+          ? feedback.text
+          : isGuided
+            ? 'Bắt đầu kéo từ chấm đỏ để hệ thống chấm đúng thứ tự và chiều nét.'
+            : 'Viết bằng chuột, ngón tay hoặc bút cảm ứng, theo đúng thứ tự nét của khung mẫu.'}
+      </p>
     </section>
   );
 };

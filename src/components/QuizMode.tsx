@@ -15,6 +15,8 @@ interface AnswerHistory {
 
 interface QuizModeProps {
   kanjiList: KanjiItem[];
+  isMastered?: (id: string) => boolean;
+  onToggleMaster?: (id: string) => void;
 }
 
 const CONFETTI_COLORS = ['#ef6b4c', '#e3b155', '#ede7dd', '#86c99a'];
@@ -31,7 +33,7 @@ const primaryButton =
 const secondaryButton =
   'inline-flex items-center justify-center gap-2 rounded-xl bg-ink-850 hover:bg-ink-800 border border-line text-paper font-medium transition-colors cursor-pointer';
 
-export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
+export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList, isMastered, onToggleMaster }) => {
   const [gameState, setGameState] = useState<'setup' | 'playing' | 'summary'>('setup');
 
   const [selectedTypes, setSelectedTypes] = useState<Set<QuizQuestionType>>(
@@ -75,8 +77,7 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
     setLimitDraft(null);
   };
 
-  const startQuiz = () => {
-    const deck = buildQuizDeck(kanjiList, Array.from(selectedTypes), effectiveLimit);
+  const beginDeck = (deck: Question[]) => {
     if (deck.length === 0) {
       setGameState('setup');
       setSetupError('Bộ lọc hiện tại không đủ chữ phù hợp với các dạng câu hỏi đã chọn. Hãy bật thêm cấp độ hoặc chọn thêm dạng câu hỏi.');
@@ -92,6 +93,15 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
     setSelectedOption(null);
     setIsAnswered(false);
     setGameState('playing');
+  };
+
+  const startQuiz = () => {
+    beginDeck(buildQuizDeck(kanjiList, Array.from(selectedTypes), effectiveLimit));
+  };
+
+  const startRetryMissed = (missed: KanjiItem[]) => {
+    if (missed.length === 0) return;
+    beginDeck(buildQuizDeck(kanjiList, Array.from(selectedTypes), missed.length, missed));
   };
 
   const handleAdvance = () => {
@@ -296,6 +306,9 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
     const correctCount = history.filter((h) => h.isCorrect).length;
     const percentage = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
     const verdict = percentage >= 80 ? 'Xuất sắc!' : percentage >= 50 ? 'Làm tốt lắm!' : 'Cần ôn thêm một chút';
+    const missedKanji = Array.from(
+      new Map(history.filter((h) => !h.isCorrect).map((h) => [h.question.targetKanji.id, h.question.targetKanji])).values()
+    );
 
     return (
       <div className="max-w-2xl mx-auto">
@@ -332,6 +345,8 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
               const correct = h.question.options.find((o) => o.isCorrect);
               const pKind = promptKind(h.question.type);
               const oKind = optionKind(h.question.type);
+              const target = h.question.targetKanji;
+              const mastered = isMastered?.(target.id) ?? false;
               return (
                 <li key={idx} className="flex items-center gap-3 px-2 py-2.5 border-b border-line last:border-b-0 text-sm">
                   {h.isCorrect ? (
@@ -359,17 +374,41 @@ export const QuizMode: React.FC<QuizModeProps> = ({ kanjiList }) => {
                       </span>
                     )}
                   </span>
+                  {onToggleMaster && (
+                    <button
+                      type="button"
+                      onClick={() => onToggleMaster(target.id)}
+                      aria-pressed={mastered}
+                      aria-label={mastered ? `Bỏ đánh dấu thuộc chữ ${target.c}` : `Đánh dấu thuộc chữ ${target.c}`}
+                      title={mastered ? 'Đã thuộc' : 'Đánh dấu thuộc'}
+                      className={`shrink-0 grid place-items-center w-8 h-8 rounded-lg transition-colors cursor-pointer ${
+                        mastered ? 'bg-ok/12 text-ok' : 'text-paper-3 hover:text-paper hover:bg-ink-850'
+                      }`}
+                    >
+                      <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                  )}
                 </li>
               );
             })}
           </ol>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {missedKanji.length > 0 ? (
+              <button type="button" onClick={() => startRetryMissed(missedKanji)} className={`${primaryButton} h-11 text-sm sm:col-span-2`}>
+                <RotateCcw className="w-4 h-4" aria-hidden="true" />
+                Làm lại {missedKanji.length} chữ sai
+              </button>
+            ) : null}
             <button type="button" onClick={() => setGameState('setup')} className={`${secondaryButton} h-11 text-sm`}>
               <Settings2 className="w-4 h-4" aria-hidden="true" />
               Đổi cấu hình
             </button>
-            <button type="button" onClick={startQuiz} className={`${primaryButton} h-11 text-sm`}>
+            <button
+              type="button"
+              onClick={startQuiz}
+              className={`${missedKanji.length > 0 ? secondaryButton : primaryButton} h-11 text-sm`}
+            >
               <RotateCcw className="w-4 h-4" aria-hidden="true" />
               Làm bài mới với chữ khác
             </button>

@@ -1,13 +1,10 @@
-import React, { useState, useMemo, useEffect, useRef, useDeferredValue, useCallback } from 'react';
-import { SearchX } from 'lucide-react';
+import React, { Suspense, lazy, useState, useMemo, useEffect, useRef, useDeferredValue, useCallback } from 'react';
+import { SearchX, X } from 'lucide-react';
 import type { KanjiItem, JLPTLevel, ViewMode, UserProgress, SortOption, StatusFilter } from './types/kanji';
 import { Header } from './components/Header';
 import { FilterPanel } from './components/FilterPanel';
 import { KanjiCard } from './components/KanjiCard';
 import { KanjiDetailModal } from './components/KanjiDetailModal';
-import { FlashcardMode } from './components/FlashcardMode';
-import { QuizMode } from './components/QuizMode';
-import { StrokeOrderPad } from './components/StrokeOrderPad';
 import {
   loadUserProgress,
   saveUserProgress,
@@ -23,6 +20,10 @@ import { isTypingTarget } from './utils/dom';
 import { DIALOG_STATE, pushLocation, readLocation, replaceLocation } from './utils/url';
 import { SPEECH_UNAVAILABLE_EVENT } from './utils/speech';
 import type { SpeechUnavailableReason } from './utils/speech';
+
+const FlashcardMode = lazy(() => import('./components/FlashcardMode').then((m) => ({ default: m.FlashcardMode })));
+const QuizMode = lazy(() => import('./components/QuizMode').then((m) => ({ default: m.QuizMode })));
+const StrokeOrderPad = lazy(() => import('./components/StrokeOrderPad').then((m) => ({ default: m.StrokeOrderPad })));
 
 const ITEMS_PER_PAGE = 96;
 const BASE_TITLE = document.title;
@@ -41,6 +42,36 @@ type Toast = { id: number; message: string; tone: 'ok' | 'bad' };
 
 const makeRandomRank = (list: KanjiItem[]) => new Map(shuffled(list.map((k) => k.id)).map((id, i) => [id, i]));
 
+function computeFilteredKanji(
+  kanjiData: KanjiItem[],
+  searchIndex: Map<string, string>,
+  selectedLevels: Set<JLPTLevel>,
+  queryText: string,
+  statusFilter: StatusFilter,
+  statusIds: string[] | null,
+  radicalFilter: string | null,
+  sortBy: SortOption,
+  randomRank: Map<string, number> | null
+): KanjiItem[] {
+  const query = foldText(queryText.trim());
+  const statusSet = statusIds ? new Set(statusIds) : null;
+
+  const list = kanjiData.filter((k) => {
+    if (!selectedLevels.has(k.lvl)) return false;
+    if (radicalFilter && k.rad !== radicalFilter) return false;
+    if (statusSet) {
+      const inSet = statusSet.has(k.id);
+      if (statusFilter === 'unmastered' ? inSet : !inSet) return false;
+    }
+    return !query || (searchIndex.get(k.id) ?? '').includes(query);
+  });
+
+  if (sortBy === 'strokes_asc') list.sort((a, b) => a.st - b.st);
+  else if (sortBy === 'strokes_desc') list.sort((a, b) => b.st - a.st);
+  else if (sortBy === 'random' && randomRank) list.sort((a, b) => (randomRank.get(a.id) ?? 0) - (randomRank.get(b.id) ?? 0));
+  return list;
+}
+
 export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
   const searchIndex = useMemo(() => buildSearchIndex(kanjiData), [kanjiData]);
   const byId = useMemo(() => new Map(kanjiData.map((k) => [k.id, k])), [kanjiData]);
@@ -48,26 +79,44 @@ export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
 
   // Where we are comes from the address bar so reload and Back keep your place
   const [initialLocation] = useState(() => readLocation());
+  const [initialPrefs] = useState(loadFilterPrefs);
+  const [progress, setProgress] = useState<UserProgress>(() => loadUserProgress(validIds));
+
   const [currentMode, setCurrentMode] = useState<ViewMode>(initialLocation.mode);
   const [activeKanji, setActiveKanji] = useState<KanjiItem | null>(() =>
     initialLocation.mode === 'grid' && initialLocation.kanjiId ? byId.get(initialLocation.kanjiId) ?? null : null
   );
   const [flashStartId, setFlashStartId] = useState(() => (initialLocation.mode === 'flashcard' ? initialLocation.kanjiId : null));
-  const [padTargetId, setPadTargetId] = useState(() => (initialLocation.mode === 'strokes' ? initialLocation.kanjiId : null));
-  const [padIndex, setPadIndex] = useState(0);
 
   // Filters: levels, status and sort are remembered; the search box starts empty
-  const [initialPrefs] = useState(loadFilterPrefs);
   const [selectedLevels, setSelectedLevels] = useState<Set<JLPTLevel>>(() => new Set(initialPrefs.levels));
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialPrefs.status);
   const [sortBy, setSortBy] = useState<SortOption>(initialPrefs.sort);
   const [randomRank, setRandomRank] = useState(() => (initialPrefs.sort === 'random' ? makeRandomRank(kanjiData) : null));
   const [searchQuery, setSearchQuery] = useState('');
+  const [radicalFilter, setRadicalFilter] = useState<string | null>(null);
   const deferredQuery = useDeferredValue(searchQuery);
   const [displayLimit, setDisplayLimit] = useState(ITEMS_PER_PAGE);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const [progress, setProgress] = useState<UserProgress>(() => loadUserProgress(validIds));
+  const [padIndex, setPadIndex] = useState(() => {
+    if (initialLocation.mode !== 'strokes' || !initialLocation.kanjiId) return 0;
+    const initStatusIds =
+      initialPrefs.status === 'starred' ? progress.starred : initialPrefs.status === 'all' ? null : progress.mastered;
+    const initList = computeFilteredKanji(
+      kanjiData,
+      searchIndex,
+      new Set(initialPrefs.levels),
+      '',
+      initialPrefs.status,
+      initStatusIds,
+      null,
+      initialPrefs.sort,
+      null
+    );
+    return Math.max(0, initList.findIndex((k) => k.id === initialLocation.kanjiId));
+  });
+
   const [toast, setToast] = useState<Toast | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -96,20 +145,6 @@ export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
     window.addEventListener(SPEECH_UNAVAILABLE_EVENT, onUnavailable);
     return () => window.removeEventListener(SPEECH_UNAVAILABLE_EVENT, onUnavailable);
   }, [showToast]);
-
-  // Browser Back/Forward: follow the address bar
-  useEffect(() => {
-    const onPop = () => {
-      const loc = readLocation();
-      setCurrentMode(loc.mode);
-      setFiltersOpen(false);
-      setActiveKanji(loc.mode === 'grid' && loc.kanjiId ? byId.get(loc.kanjiId) ?? null : null);
-      if (loc.mode === 'flashcard') setFlashStartId(loc.kanjiId);
-      if (loc.mode === 'strokes') setPadTargetId(loc.kanjiId);
-    };
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, [byId]);
 
   // Drop an unknown ?chu= from a shared or stale link
   useEffect(() => {
@@ -191,31 +226,37 @@ export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
   // as mastered under "Tất cả" does not rebuild the list (and reset the flashcard deck)
   const statusIds = statusFilter === 'starred' ? progress.starred : statusFilter === 'all' ? null : progress.mastered;
 
-  const filteredKanji = useMemo(() => {
-    const query = foldText(deferredQuery.trim());
-    const statusSet = statusIds ? new Set(statusIds) : null;
+  const filteredKanji = useMemo(
+    () =>
+      computeFilteredKanji(
+        kanjiData,
+        searchIndex,
+        selectedLevels,
+        deferredQuery,
+        statusFilter,
+        statusIds,
+        radicalFilter,
+        sortBy,
+        randomRank
+      ),
+    [kanjiData, searchIndex, selectedLevels, deferredQuery, statusFilter, statusIds, radicalFilter, sortBy, randomRank]
+  );
 
-    const list = kanjiData.filter((k) => {
-      if (!selectedLevels.has(k.lvl)) return false;
-      if (statusSet) {
-        const inSet = statusSet.has(k.id);
-        if (statusFilter === 'unmastered' ? inSet : !inSet) return false;
+  // Browser Back/Forward: follow the address bar
+  useEffect(() => {
+    const onPop = () => {
+      const loc = readLocation();
+      setCurrentMode(loc.mode);
+      setFiltersOpen(false);
+      setActiveKanji(loc.mode === 'grid' && loc.kanjiId ? byId.get(loc.kanjiId) ?? null : null);
+      if (loc.mode === 'flashcard') setFlashStartId(loc.kanjiId);
+      if (loc.mode === 'strokes' && loc.kanjiId) {
+        setPadIndex(Math.max(0, filteredKanji.findIndex((k) => k.id === loc.kanjiId)));
       }
-      return !query || (searchIndex.get(k.id) ?? '').includes(query);
-    });
-
-    if (sortBy === 'strokes_asc') list.sort((a, b) => a.st - b.st);
-    else if (sortBy === 'strokes_desc') list.sort((a, b) => b.st - a.st);
-    else if (sortBy === 'random' && randomRank) list.sort((a, b) => (randomRank.get(a.id) ?? 0) - (randomRank.get(b.id) ?? 0));
-    return list;
-  }, [kanjiData, searchIndex, selectedLevels, deferredQuery, statusFilter, statusIds, sortBy, randomRank]);
-
-  // A writing-lab kanji named by the URL is resolved once the list is known
-  if (padTargetId !== null) {
-    const idx = filteredKanji.findIndex((k) => k.id === padTargetId);
-    setPadIndex(Math.max(0, idx));
-    setPadTargetId(null);
-  }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [byId, filteredKanji]);
 
   const handleSelectMode = (mode: ViewMode) => {
     if (mode === currentMode && !activeKanji) return;
@@ -260,6 +301,15 @@ export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
     }
   }, []);
 
+  const handleSelectRadical = useCallback(
+    (rad: string) => {
+      setRadicalFilter(rad);
+      setDisplayLimit(ITEMS_PER_PAGE);
+      handleCloseModal();
+    },
+    [handleCloseModal]
+  );
+
   const handleFlashcardChange = useCallback((id: string) => {
     replaceLocation({ mode: 'flashcard', kanjiId: id });
   }, []);
@@ -297,6 +347,7 @@ export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
 
   const resetFilters = () => {
     setSearchQuery('');
+    setRadicalFilter(null);
     setStatusFilter('all');
     handleSelectAllLevels();
   };
@@ -346,11 +397,23 @@ export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
 
         {currentMode === 'grid' && (
           <div>
-            <div className="flex items-center justify-between mb-3 px-1 text-xs text-paper-3">
-              <p className="tabular-nums">
-                Hiển thị <span className="text-paper font-medium">{Math.min(filteredKanji.length, displayLimit).toLocaleString('vi-VN')}</span> /{' '}
-                <span className="text-paper font-medium">{filteredKanji.length.toLocaleString('vi-VN')}</span> chữ
-              </p>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3 px-1 text-xs text-paper-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="tabular-nums">
+                  Hiển thị <span className="text-paper font-medium">{Math.min(filteredKanji.length, displayLimit).toLocaleString('vi-VN')}</span> /{' '}
+                  <span className="text-paper font-medium">{filteredKanji.length.toLocaleString('vi-VN')}</span> chữ
+                </p>
+                {radicalFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setRadicalFilter(null)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-ink-850 border border-line text-paper-2 hover:text-paper cursor-pointer transition-colors"
+                  >
+                    Bộ <span lang="ja" className="text-paper font-medium">{radicalFilter}</span>
+                    <X className="w-3 h-3" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
               {searchQuery && (
                 <button type="button" onClick={() => setSearchQuery('')} className="text-shu hover:underline underline-offset-2 cursor-pointer">
                   Xóa tìm kiếm
@@ -406,31 +469,39 @@ export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
           </div>
         )}
 
-        {currentMode === 'flashcard' && (
-          <FlashcardMode
-            kanjiList={filteredKanji}
-            isStarred={(id) => starredSet.has(id)}
-            isMastered={(id) => masteredSet.has(id)}
-            onToggleStar={handleToggleStar}
-            onToggleMaster={handleToggleMaster}
-            initialId={flashStartId}
-            onCurrentChange={handleFlashcardChange}
-          />
-        )}
+        <Suspense fallback={null}>
+          {currentMode === 'flashcard' && (
+            <FlashcardMode
+              kanjiList={filteredKanji}
+              isStarred={(id) => starredSet.has(id)}
+              isMastered={(id) => masteredSet.has(id)}
+              onToggleStar={handleToggleStar}
+              onToggleMaster={handleToggleMaster}
+              initialId={flashStartId}
+              onCurrentChange={handleFlashcardChange}
+            />
+          )}
 
-        {currentMode === 'quiz' && <QuizMode kanjiList={filteredKanji} />}
+          {currentMode === 'quiz' && (
+            <QuizMode
+              kanjiList={filteredKanji}
+              isMastered={(id) => masteredSet.has(id)}
+              onToggleMaster={handleToggleMaster}
+            />
+          )}
 
-        {currentMode === 'strokes' && (
-          <StrokeOrderPad
-            kanjiList={filteredKanji}
-            currentIndex={safePadIndex}
-            onNavigate={setPadIndex}
-            isStarred={padKanji ? starredSet.has(padKanji.id) : false}
-            isMastered={padKanji ? masteredSet.has(padKanji.id) : false}
-            onToggleStar={handleToggleStar}
-            onToggleMaster={handleToggleMaster}
-          />
-        )}
+          {currentMode === 'strokes' && (
+            <StrokeOrderPad
+              kanjiList={filteredKanji}
+              currentIndex={safePadIndex}
+              onNavigate={setPadIndex}
+              isStarred={padKanji ? starredSet.has(padKanji.id) : false}
+              isMastered={padKanji ? masteredSet.has(padKanji.id) : false}
+              onToggleStar={handleToggleStar}
+              onToggleMaster={handleToggleMaster}
+            />
+          )}
+        </Suspense>
       </main>
 
       {activeKanji && (
@@ -443,6 +514,7 @@ export function App({ kanjiData }: { kanjiData: KanjiItem[] }) {
           isMastered={masteredSet.has(activeKanji.id)}
           onToggleStar={handleToggleStar}
           onToggleMaster={handleToggleMaster}
+          onSelectRadical={handleSelectRadical}
         />
       )}
 

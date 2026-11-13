@@ -5,7 +5,7 @@ export const AppSkeleton: React.FC = () => (
   <div className="min-h-screen flex flex-col" aria-busy="true">
     <header className="border-b border-line bg-ink-950">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-2.5">
-        <span lang="ja" aria-hidden="true" className="grid place-items-center w-8 h-8 rounded-md bg-shu-600 text-[#fbf6ee] font-kanji text-lg leading-none">
+        <span lang="ja" aria-hidden="true" className="grid place-items-center w-8 h-8 rounded-md bg-shu-600 text-white font-kanji text-lg leading-none">
           漢
         </span>
         <span className="font-semibold text-paper">Kanji Helper</span>

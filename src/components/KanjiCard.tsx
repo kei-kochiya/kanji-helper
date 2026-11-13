@@ -2,6 +2,7 @@ import React from 'react';
 import { Bookmark, CheckCircle2, Volume2 } from 'lucide-react';
 import type { KanjiItem } from '../types/kanji';
 import { speakJapanese } from '../utils/speech';
+import { loadStrokes } from '../utils/strokes';
 import { LevelLabel } from './LevelLabel';
 
 interface KanjiCardProps {
@@ -13,7 +14,7 @@ interface KanjiCardProps {
 }
 
 const iconButton =
-  'grid place-items-center w-7 h-7 rounded-md transition-colors cursor-pointer hover:bg-ink-800';
+  'grid place-items-center w-8 h-8 rounded-md transition-colors cursor-pointer hover:bg-ink-800';
 
 export const KanjiCard: React.FC<KanjiCardProps> = ({ kanji, isStarred, isMastered, onSelect, onToggleStar }) => {
   const hv = kanji.hv.join(' · ') || '—';
@@ -24,10 +25,11 @@ export const KanjiCard: React.FC<KanjiCardProps> = ({ kanji, isStarred, isMaster
       <button
         type="button"
         onClick={() => onSelect(kanji)}
+        onPointerEnter={() => void loadStrokes(kanji.code)}
         aria-label={`Xem chi tiết chữ ${kanji.c}, ${hv}`}
         className="w-full h-full text-left p-3.5 rounded-xl cursor-pointer flex flex-col gap-3"
       >
-        <span className="flex items-center gap-1.5 h-7 pr-16">
+        <span className="flex items-center gap-1.5 h-8 pr-18">
           <LevelLabel level={kanji.lvl} />
           {isMastered && (
             <CheckCircle2 className="w-3.5 h-3.5 text-ok" aria-label="Đã thuộc" role="img" />
@@ -41,7 +43,7 @@ export const KanjiCard: React.FC<KanjiCardProps> = ({ kanji, isStarred, isMaster
           <span className="min-w-0 flex-1 flex flex-col gap-0.5">
             <span className="text-sm font-semibold text-kin tracking-wide truncate">{hv}</span>
             <span className="text-xs text-paper-2 truncate">{kanji.m_vi.join(', ') || kanji.m_en.join(', ')}</span>
-            <span className="text-[11px] text-paper-3 tabular-nums">
+            <span className="text-xs text-paper-3 tabular-nums">
               {kanji.st} nét · Bộ <span lang="ja">{kanji.rad}</span>
             </span>
           </span>
@@ -49,17 +51,17 @@ export const KanjiCard: React.FC<KanjiCardProps> = ({ kanji, isStarred, isMaster
 
         <span className="grid grid-cols-2 gap-2 pt-2.5 border-t border-line text-xs">
           <span className="truncate" title={`On: ${kanji.on.join('、')}`}>
-            <span className="text-[11px] text-paper-3 mr-1.5">On</span>
+            <span className="text-paper-3 mr-1.5">On</span>
             <span lang="ja" className="font-jp text-paper-2">{kanji.on[0] || '—'}</span>
           </span>
           <span className="truncate text-right" title={`Kun: ${kanji.kun.join('、')}`}>
-            <span className="text-[11px] text-paper-3 mr-1.5">Kun</span>
+            <span className="text-paper-3 mr-1.5">Kun</span>
             <span lang="ja" className="font-jp text-paper-2">{kanji.kun[0] || '—'}</span>
           </span>
         </span>
       </button>
 
-      <div className="absolute top-3 right-3 flex items-center gap-0.5">
+      <div className="absolute top-2.5 right-2.5 flex items-center gap-1">
         <button
           type="button"
           onClick={() => speakJapanese(kanji.c)}

@@ -62,13 +62,13 @@ export const Header: React.FC<HeaderProps> = ({
             <span
               lang="ja"
               aria-hidden="true"
-              className="grid place-items-center w-8 h-8 rounded-md bg-shu-600 text-[#fbf6ee] font-kanji text-lg leading-none select-none shrink-0"
+              className="grid place-items-center w-8 h-8 rounded-md bg-shu-600 text-white font-kanji text-lg leading-none select-none shrink-0"
             >
               漢
             </span>
             <div className="min-w-0">
               <div className="font-semibold text-paper leading-tight">Kanji Helper</div>
-              <div className="text-[11px] text-paper-3 leading-tight hidden sm:block truncate">
+              <div className="text-xs text-paper-3 leading-tight hidden sm:block truncate">
                 {totalKanji.toLocaleString('vi-VN')} Hán tự · N5 → N1
               </div>
             </div>

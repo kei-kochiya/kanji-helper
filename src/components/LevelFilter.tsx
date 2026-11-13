@@ -34,7 +34,7 @@ export const LevelFilter: React.FC<LevelFilterProps> = ({
         className={`${chipBase} ${isAllSelected ? 'bg-paper text-ink-950 border-paper font-semibold' : chipIdle}`}
       >
         Tất cả
-        <span className="opacity-70">{totalCount.toLocaleString('vi-VN')}</span>
+        <span className={isAllSelected ? '' : 'text-paper-3'}>{totalCount.toLocaleString('vi-VN')}</span>
       </button>
 
       {ALL_LEVELS.map((lvl) => {
@@ -51,7 +51,7 @@ export const LevelFilter: React.FC<LevelFilterProps> = ({
           >
             <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} aria-hidden="true" />
             <span className="font-semibold">{lvl}</span>
-            <span className="opacity-70">{(levelCounts[lvl] || 0).toLocaleString('vi-VN')}</span>
+            <span className={isSelected ? '' : 'text-paper-3'}>{(levelCounts[lvl] || 0).toLocaleString('vi-VN')}</span>
           </button>
         );
       })}

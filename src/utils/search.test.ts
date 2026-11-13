@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import kanjiData from '../data/kanji_data.json';
-import type { KanjiItem } from '../types/kanji';
+import type { RawKanjiItem } from '../types/kanji';
+import { hydrateKanjiData } from './dataset';
 import { buildSearchIndex, foldText } from './search';
 
-const data = kanjiData as KanjiItem[];
+const data = hydrateKanjiData(kanjiData as RawKanjiItem[]);
 const index = buildSearchIndex(data);
 const search = (q: string) => data.filter((k) => index.get(k.id)!.includes(foldText(q))).map((k) => k.c);
 
@@ -45,5 +46,10 @@ describe('search index', () => {
   it('finds English and Vietnamese meanings', () => {
     expect(search('study')).toContain('学');
     expect(search('mat troi')).toContain('日');
+  });
+
+  it('finds kanji via Jukugo compound readings and Vietnamese meanings', () => {
+    expect(search('あした')).toContain('日');
+    expect(search('ngay mai')).toContain('日');
   });
 });

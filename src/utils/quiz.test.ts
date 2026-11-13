@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import kanjiData from '../data/kanji_data.json';
-import type { KanjiItem } from '../types/kanji';
+import type { RawKanjiItem } from '../types/kanji';
+import { hydrateKanjiData } from './dataset';
 import { ALL_QUIZ_TYPES, bareReading, buildQuizDeck, supportsType } from './quiz';
 import type { Question } from './quiz';
 
-const data = kanjiData as KanjiItem[];
+const data = hydrateKanjiData(kanjiData as RawKanjiItem[]);
 const byChar = new Map(data.map((k) => [k.c, k]));
 const ALL_TYPES = ALL_QUIZ_TYPES.map((t) => t.id);
 const N5 = data.filter((k) => k.lvl === 'N5');
@@ -22,6 +23,14 @@ describe('buildQuizDeck', () => {
   it('needs at least four kanji and one question type', () => {
     expect(buildQuizDeck(N5.slice(0, 3), ALL_TYPES, 10)).toEqual([]);
     expect(buildQuizDeck(N5, [], 10)).toEqual([]);
+  });
+
+  it('builds a retry deck from a single missed target using the full pool for distractors', () => {
+    const retryDeck = buildQuizDeck(N5, ALL_TYPES, 1, [N5[0]]);
+    expect(retryDeck).toHaveLength(1);
+    expect(retryDeck[0].targetKanji.id).toBe(N5[0].id);
+    expect(retryDeck[0].options).toHaveLength(4);
+    expect(new Set(retryDeck[0].options.map((o) => o.primaryText)).size).toBe(4);
   });
 
   it('never repeats a target kanji within a session', () => {

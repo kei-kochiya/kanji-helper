@@ -15,6 +15,7 @@ interface KanjiDetailModalProps {
   isMastered: boolean;
   onToggleStar: (id: string) => void;
   onToggleMaster: (id: string) => void;
+  onSelectRadical?: (rad: string) => void;
 }
 
 const headerButton =
@@ -31,6 +32,7 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
   isMastered,
   onToggleStar,
   onToggleMaster,
+  onSelectRadical,
 }) => {
   const [copied, setCopied] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -109,7 +111,7 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
         <div className="flex items-center justify-between gap-3 pl-5 pr-3 h-14 border-b border-line shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <LevelLabel level={kanji.lvl} />
-            <span className="font-mono text-[11px] text-paper-3 hidden sm:inline">U+{kanji.code.toUpperCase()}</span>
+            <span className="font-mono text-xs text-paper-3 hidden sm:inline">U+{kanji.code.toUpperCase()}</span>
           </div>
 
           <div className="flex items-center gap-0.5">
@@ -198,7 +200,21 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
 
               <h2 className="mt-4 text-3xl font-bold text-kin tracking-wide">{hv}</h2>
               <p className="mt-1 text-sm text-paper-3">
-                {kanji.st} nét · Bộ {kanji.rad_vi || <span lang="ja">{kanji.rad}</span>}
+                {kanji.st} nét ·{' '}
+                {onSelectRadical ? (
+                  <button
+                    type="button"
+                    onClick={() => onSelectRadical(kanji.rad)}
+                    title={`Lọc các chữ cùng bộ ${kanji.rad}`}
+                    className="hover:text-paper underline decoration-line-strong underline-offset-4 cursor-pointer transition-colors"
+                  >
+                    Bộ {kanji.rad_vi || <span lang="ja">{kanji.rad}</span>}
+                  </button>
+                ) : (
+                  <>
+                    Bộ {kanji.rad_vi || <span lang="ja">{kanji.rad}</span>}
+                  </>
+                )}
               </p>
 
               <ul className="mt-5 flex flex-col gap-1.5 text-[15px] text-paper list-disc pl-5 marker:text-shu">
@@ -226,18 +242,35 @@ export const KanjiDetailModal: React.FC<KanjiDetailModalProps> = ({
 
           {kanji.words.length > 0 && (
             <section className="px-5 sm:px-6 py-5 border-t border-line">
-              <h3 className="text-sm font-semibold text-paper-2 mb-2.5">Từ ghép ví dụ</h3>
-              <div className="flex flex-wrap gap-2">
+              <h3 className="text-sm font-semibold text-paper-2 mb-3">Từ ghép ví dụ</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {kanji.words.map((word, idx) => (
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => speakJapanese(word)}
-                    title="Nghe phát âm"
-                    className={readingChip}
+                    onClick={() => speakJapanese(word.w)}
+                    title={`Nghe ${word.w}`}
+                    className="group flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border border-line bg-ink-950 hover:border-line-strong text-left transition-colors cursor-pointer"
                   >
-                    <span lang="ja" className="font-jp">{word}</span>
-                    <Volume2 className="w-3.5 h-3.5 text-paper-3" aria-hidden="true" />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <span lang="ja" className="font-jp text-base font-medium text-paper">
+                          {word.w}
+                        </span>
+                        {word.r && word.r !== word.w && (
+                          <span lang="ja" className="font-jp text-xs text-paper-2">
+                            {word.r}
+                          </span>
+                        )}
+                        {word.hv && (
+                          <span className="text-xs font-semibold text-kin tracking-wide">
+                            {word.hv}
+                          </span>
+                        )}
+                      </span>
+                      {word.m && <span className="block text-xs text-paper-2 mt-0.5 truncate">{word.m}</span>}
+                    </span>
+                    <Volume2 className="w-3.5 h-3.5 text-paper-3 group-hover:text-paper shrink-0 transition-colors" aria-hidden="true" />
                   </button>
                 ))}
               </div>

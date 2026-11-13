@@ -225,16 +225,23 @@ export function createQuestion(target: KanjiItem, type: QuizQuestionType, pool: 
 }
 
 /** A whole session up front: distinct target kanji, question types rotated across the deck. */
-export function buildQuizDeck(pool: KanjiItem[], types: QuizQuestionType[], limit: number): Question[] {
+export function buildQuizDeck(
+  pool: KanjiItem[],
+  types: QuizQuestionType[],
+  limit: number,
+  targetPool?: KanjiItem[]
+): Question[] {
   if (pool.length < 4 || types.length === 0) return [];
-  const targetCount = Math.min(limit, pool.length);
+  const sourceTargets = targetPool ?? pool;
+  if (sourceTargets.length === 0) return [];
+  const targetCount = Math.min(limit, sourceTargets.length);
   const poolReadings = {
     on: Array.from(new Set(pool.flatMap((k) => k.on))),
     kun: Array.from(new Set(pool.flatMap((k) => k.kun))),
   };
 
   const deck: Question[] = [];
-  for (const target of shuffled(pool)) {
+  for (const target of shuffled(sourceTargets)) {
     if (deck.length >= targetCount) break;
     const eligible = types.filter((t) => supportsType(target, t));
     if (eligible.length === 0) continue;

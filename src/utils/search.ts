@@ -14,13 +14,14 @@ export function foldText(text: string): string {
     .normalize('NFC');
 }
 
-/** One folded string per kanji covering every searchable field. */
+/** One folded string per kanji covering every searchable field, including Jukugo words. */
 export function buildSearchIndex(list: KanjiItem[]): Map<string, string> {
   const index = new Map<string, string>();
   for (const k of list) {
     // Kun readings are indexed both as written ("よ.む") and without okurigana marks ("よむ")
     const kunPlain = k.kun.map((r) => r.replace(/[.-]/g, ''));
-    const blob = [k.c, ...k.hv, ...k.m_vi, ...k.m_en, ...k.on, ...k.kun, ...kunPlain].join('\u0001');
+    const wordParts = k.words.flatMap((w) => [w.w, w.r, w.hv, w.m]);
+    const blob = [k.c, ...k.hv, ...k.m_vi, ...k.m_en, ...k.on, ...k.kun, ...kunPlain, ...wordParts].join('\u0001');
     index.set(k.id, foldText(blob));
   }
   return index;

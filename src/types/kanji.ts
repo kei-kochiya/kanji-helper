@@ -1,7 +1,14 @@
 export type JLPTLevel = 'N5' | 'N4' | 'N3' | 'N2' | 'N1';
 
-export interface KanjiItem {
-  id: string;          // Kanji character (e.g. "日")
+export interface KanjiWord {
+  w: string;   // Word (e.g. "明日")
+  r: string;   // Reading in kana (e.g. "あした")
+  hv: string;  // Sino-Vietnamese reading (e.g. "MINH NHẬT")
+  m: string;   // Vietnamese meaning (e.g. "ngày mai")
+}
+
+export interface RawKanjiItem {
+  id?: string;
   c: string;           // Character
   lvl: JLPTLevel;      // JLPT Level
   hv: string[];        // Sino-Vietnamese (Hán Việt), e.g. ["NHẬT", "NHỰT"]
@@ -12,7 +19,12 @@ export interface KanjiItem {
   st: number;          // Stroke count
   rad: string;         // Radical character
   rad_vi?: string;     // Radical name in Vietnamese
-  words: string[];     // Example words (Jukugo)
+  words: KanjiWord[];  // Enriched example words (Jukugo)
+  code?: string;
+}
+
+export interface KanjiItem extends RawKanjiItem {
+  id: string;          // Kanji character (e.g. "日")
   code: string;        // 5-digit hex unicode for KanjiVG SVG
 }
 
