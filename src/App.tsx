@@ -14,7 +14,8 @@ import {
   saveFilterPrefs,
 } from './utils/storage';
 import { ALL_LEVELS } from './utils/levels';
-import { buildSearchIndex, foldText } from './utils/search';
+import { buildSearchIndex, parseSearchQuery, scoreSearchMatch } from './utils/search';
+import type { SearchEntry } from './utils/search';
 import { shuffled } from './utils/random';
 import { isTypingTarget } from './utils/dom';
 import { DIALOG_STATE, pushLocation, readLocation, replaceLocation } from './utils/url';
@@ -44,7 +45,7 @@ const makeRandomRank = (list: KanjiItem[]) => new Map(shuffled(list.map((k) => k
 
 function computeFilteredKanji(
   kanjiData: KanjiItem[],
-  searchIndex: Map<string, string>,
+  searchIndex: Map<string, SearchEntry>,
   selectedLevels: Set<JLPTLevel>,
   queryText: string,
   statusFilter: StatusFilter,
@@ -53,8 +54,9 @@ function computeFilteredKanji(
   sortBy: SortOption,
   randomRank: Map<string, number> | null
 ): KanjiItem[] {
-  const query = foldText(queryText.trim());
+  const parsedQuery = parseSearchQuery(queryText);
   const statusSet = statusIds ? new Set(statusIds) : null;
+  const scores = parsedQuery ? new Map<string, number>() : null;
 
   const list = kanjiData.filter((k) => {
     if (!selectedLevels.has(k.lvl)) return false;
@@ -63,12 +65,19 @@ function computeFilteredKanji(
       const inSet = statusSet.has(k.id);
       if (statusFilter === 'unmastered' ? inSet : !inSet) return false;
     }
-    return !query || (searchIndex.get(k.id) ?? '').includes(query);
+    if (!parsedQuery) return true;
+    const entry = searchIndex.get(k.id);
+    if (!entry) return false;
+    const score = scoreSearchMatch(entry, parsedQuery);
+    if (score === 0) return false;
+    scores!.set(k.id, score);
+    return true;
   });
 
   if (sortBy === 'strokes_asc') list.sort((a, b) => a.st - b.st);
   else if (sortBy === 'strokes_desc') list.sort((a, b) => b.st - a.st);
   else if (sortBy === 'random' && randomRank) list.sort((a, b) => (randomRank.get(a.id) ?? 0) - (randomRank.get(b.id) ?? 0));
+  else if (scores) list.sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0));
   return list;
 }
 
